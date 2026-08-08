@@ -471,6 +471,37 @@ tr.row-past td.cell-live,tr.row-soon td.cell-live,tr.row-ready td.cell-live{back
     <div class="mode-toggle">
       <button class="mode-btn active" id="mode-single" onclick="setDispatchMode('single')">Single Entry</button>
       <button class="mode-btn" id="mode-bulk" onclick="setDispatchMode('bulk')">Outbound Report</button>
+      <button class="mode-btn" id="mode-trailerloc" onclick="setDispatchMode('trailerloc')">Trailer Location Report</button>
+    </div>
+
+    <div id="trailerLocCard" class="card" style="display:none;margin-bottom:16px;">
+      <div class="drop-zone" id="trailerLocDropZone">
+        <div class="drop-copy">
+          <span class="drop-title">Drop the On Site Trailers list here</span>
+          <span class="drop-sub">DCS export with Trailer #, Current Zone and Workflow State columns.</span>
+        </div>
+        <div class="file-import-row">
+          <input type="file" id="trailerLocFile" accept=".xlsx,.xls,.csv,.tsv,.txt" onchange="handleReportFile(this, 'trailerLocPaste', 'trailerLocFileName', previewTrailerLocImport)">
+          <button class="btn-ghost" type="button" onclick="document.getElementById('trailerLocFile').click()">Choose File</button>
+          <span class="file-name" id="trailerLocFileName">No file selected</span>
+        </div>
+      </div>
+      <textarea id="trailerLocPaste" rows="6" style="display:none;"></textarea>
+      <div class="submit-row">
+        <span class="hint">Only rows with Workflow State <b>Ready to Depart</b> are used. Each one's Current Zone becomes the Confirmed Trailer Location on the shipment carrying that Trailer #.</span>
+        <button class="btn-primary" onclick="previewTrailerLocImport()">Preview</button>
+      </div>
+      <div id="trailerLocPreviewWrap" style="display:none;margin-top:16px;">
+        <div id="trailerLocWarnings"></div>
+        <div style="max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:8px;">
+          <table id="trailerLocPreviewTable"></table>
+        </div>
+        <div class="submit-row">
+          <span class="hint">Only trailers matching a shipment on the board are applied. Unmatched trailers are skipped.</span>
+          <button class="btn-ghost" type="button" onclick="clearTrailerLocPreview()">Clear Preview</button>
+          <button class="btn-primary" id="btn-trailerloc-import" onclick="applyTrailerLocRows()">Update Confirmed Locations</button>
+        </div>
+      </div>
     </div>
 
     <div id="bulkCard" class="card" style="display:none;margin-bottom:16px;">
@@ -1162,12 +1193,19 @@ function mapRows(raw, headerMap, defaultIndexMap, minHeaderHits){
   } else {
     Object.assign(colMap, defaultIndexMap);
   }
+  const usedHeader = headerHits >= (minHeaderHits || 2);
   return {
     mappedRows: dataRows.map(cells => {
       const row = {};
       Object.keys(colMap).forEach(idx => { row[colMap[idx]] = (cells[idx] || '').trim(); });
       return row;
     }),
+    // Which fields the report actually carried, and whether that came from a real header
+    // row. A field that was present but empty means something ("no trailer assigned yet");
+    // a field the report never had means nothing. Callers can only tell those apart when
+    // a header was matched — under the positional fallback every absent column looks blank.
+    fields: Object.keys(colMap).map(idx => colMap[idx]),
+    usedHeader: usedHeader,
     skipped: 0
   };
 }
@@ -1454,6 +1492,7 @@ function renderLogEmptyTrailerCell(shipment){
 }
 
 async function handleLogEmptyTrailerChange(cs, newId){
+  if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
   await loadShipments();
   await loadEmptyTrailers();
   const shipment = shipments[cs];
@@ -1551,8 +1590,10 @@ function checkCommodityWarehouse(){
 function setDispatchMode(mode){
   document.getElementById('mode-single').classList.toggle('active', mode==='single');
   document.getElementById('mode-bulk').classList.toggle('active', mode==='bulk');
+  document.getElementById('mode-trailerloc').classList.toggle('active', mode==='trailerloc');
   document.getElementById('singleCard').style.display = mode==='single' ? 'block':'none';
   document.getElementById('bulkCard').style.display = mode==='bulk' ? 'block':'none';
+  document.getElementById('trailerLocCard').style.display = mode==='trailerloc' ? 'block':'none';
 }
 
 function setCarrierMode(mode){
@@ -1599,7 +1640,8 @@ function previewBulk(){
   const raw = document.getElementById('bulkPaste').value;
   if(!raw.trim()){ showToast('Choose a file or paste some rows first', true); return; }
 
-  const result = buildShipmentRowsFromReport(mapRows(raw, HEADER_MAP, DEFAULT_INDEX_MAP).mappedRows);
+  const mapped = mapRows(raw, HEADER_MAP, DEFAULT_INDEX_MAP);
+  const result = buildShipmentRowsFromReport(mapped.mappedRows, mapped.usedHeader ? mapped.fields : []);
   parsedBulkRows = result.rows;
   let skipped = result.skipped;
 
@@ -1621,8 +1663,12 @@ function splitStoreNumbers(value){
   return String(value || '').split(/[,\n;]+/).map(v => v.trim()).filter(Boolean);
 }
 
-function buildShipmentRowsFromReport(mappedRows){
+function buildShipmentRowsFromReport(mappedRows, reportedFields){
   const grouped = new Map();
+  // Fields the report itself carried, so importBulk can clear a value the report shows
+  // as empty instead of only ever adding. Without this a wrong trailer #, state or
+  // gate-out time imported once could never be corrected, only deleted with the shipment.
+  const reported = reportedFields || [];
   let skipped = 0;
   mappedRows.forEach(row => {
     const cs = (row.csNumber || '').trim();
@@ -1660,7 +1706,9 @@ function buildShipmentRowsFromReport(mappedRows){
     trailerNumber: item.trailerNumber,
     consignee: item.storeNumbers.length ? item.storeNumbers[item.storeNumbers.length - 1] : '',
     currentState: item.currentState,
-    gateOutTime: item.gateOutTime
+    gateOutTime: item.gateOutTime,
+    clearable: ['commodityShipper','trailerNumber','currentState','gateOutTime','scheduleRelease']
+      .filter(f => reported.indexOf(f) !== -1)
   }));
   return { rows, skipped };
 }
@@ -1773,6 +1821,7 @@ function todayDatePart(){
 }
 
 function updateRouteStopTime(cs, index, field, timeValue){
+  if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
   if(!timeValue) return;
   const s = shipments[cs];
   const stop = s && s.routeStops && s.routeStops[index];
@@ -1995,6 +2044,169 @@ function clearCarrierImportPreview(opts){
   }
 }
 
+// ---------- TRAILER LOCATION IMPORT (DCS "On Site Trailers" list) ----------
+// DCM's yard report. A trailer sitting at Workflow State "Ready to Depart" is staged and
+// its Current Zone is where NFI's driver will find it — that zone becomes the shipment's
+// Confirmed Trailer Location, matched by Trailer #. Any other workflow state means the
+// trailer isn't staged yet, so it carries no location worth publishing.
+const HEADER_MAP_TRAILER_LOC = {
+  'trailer #':'trailerNumber', 'trailer#':'trailerNumber', 'trailer':'trailerNumber',
+  'trailer no':'trailerNumber', 'trailer number':'trailerNumber', 'trailer info':'trailerNumber',
+  'current zone':'currentZone', 'zone':'currentZone',
+  'workflow state':'workflowState', 'workflowstate':'workflowState', 'state':'workflowState',
+  'site':'site',
+  'warehouse code':'warehouseCode',
+  'trailer comment':'trailerComment', 'comment':'trailerComment'
+};
+// Column order of the current DCS export, used only when no header row is recognized.
+const DEFAULT_INDEX_MAP_TRAILER_LOC = {0:'site', 1:'currentZone', 3:'trailerNumber', 7:'workflowState', 8:'warehouseCode', 17:'trailerComment'};
+
+const READY_TO_DEPART_RE = /^ready\s*to\s*depart$/i;
+
+// Trailer numbers arrive with stray spaces, dashes and leading zeros depending on which
+// system printed them, so compare on a normalized form rather than raw text.
+function trailerKey(value){
+  const text = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if(!text) return '';
+  return /^\d+$/.test(text) ? String(parseInt(text, 10)) : text;
+}
+
+let parsedTrailerLocRows = [];
+
+function extractTrailerLocRows(raw){
+  const { mappedRows } = mapRows(raw, HEADER_MAP_TRAILER_LOC, DEFAULT_INDEX_MAP_TRAILER_LOC, 2);
+  const rows = [];
+  const seen = new Set();
+  let notReady = 0, noZone = 0, skipped = 0;
+  mappedRows.forEach(row => {
+    const trailerNumber = cleanCarrierCell(row.trailerNumber);
+    const key = trailerKey(trailerNumber);
+    if(!key){ skipped++; return; }
+    if(!READY_TO_DEPART_RE.test(String(row.workflowState || '').trim())){ notReady++; return; }
+    const currentZone = cleanCarrierCell(row.currentZone);
+    if(!currentZone){ noZone++; return; } // staged but the report doesn't say where
+    if(seen.has(key)) return; // a trailer listed twice — first staged row wins
+    seen.add(key);
+    rows.push({
+      trailerNumber, trailerKey: key,
+      currentZone: caps(currentZone),
+      site: cleanCarrierCell(row.site),
+      workflowState: String(row.workflowState || '').trim()
+    });
+  });
+  return { rows, notReady, noZone, skipped };
+}
+
+// Shipments carrying a given trailer #. More than one is not resolved by guessing —
+// writing a staging zone onto the wrong load sends a driver to the wrong trailer.
+function shipmentsForTrailerKey(key){
+  return Object.values(shipments).filter(s => trailerKey(s.trailerNumber) === key);
+}
+
+async function previewTrailerLocImport(){
+  const raw = document.getElementById('trailerLocPaste').value;
+  if(!raw.trim()){ showToast('Choose an On Site Trailers file first', true); return; }
+  await loadShipments();
+  const result = extractTrailerLocRows(raw);
+  parsedTrailerLocRows = result.rows.map(r => {
+    const matches = shipmentsForTrailerKey(r.trailerKey);
+    const current = matches.length === 1 ? (matches[0].confirmedLocation || '') : '';
+    return {
+      ...r,
+      csNumber: matches.length === 1 ? matches[0].csNumber : '',
+      ambiguous: matches.length > 1,
+      matched: matches.length === 1,
+      unchanged: matches.length === 1 && current === r.currentZone,
+      currentLocation: current
+    };
+  });
+
+  const notes = [];
+  if(result.notReady > 0) notes.push(`${result.notReady} trailer(s) skipped — not Ready to Depart.`);
+  if(result.noZone > 0) notes.push(`${result.noZone} Ready to Depart trailer(s) skipped — no Current Zone on the report.`);
+  const ambiguous = parsedTrailerLocRows.filter(r => r.ambiguous).length;
+  if(ambiguous > 0) notes.push(`${ambiguous} trailer(s) are on more than one shipment — left alone rather than guessing.`);
+  document.getElementById('trailerLocWarnings').innerHTML = notes.length
+    ? `<div class="warn-box">${notes.join('<br>')}</div>` : '';
+
+  if(parsedTrailerLocRows.length === 0){
+    document.getElementById('trailerLocPreviewTable').innerHTML = '';
+    document.getElementById('trailerLocPreviewWrap').style.display = 'none';
+    showToast('No Ready to Depart trailers found in that report', true);
+    return;
+  }
+  renderTrailerLocPreviewTable();
+  document.getElementById('trailerLocPreviewWrap').style.display = 'block';
+}
+
+function renderTrailerLocPreviewTable(){
+  const table = document.getElementById('trailerLocPreviewTable');
+  table.innerHTML = `<thead><tr><th>Trailer #</th><th>Current Zone</th><th>Site</th><th>CS#</th><th>Confirmed Location Now</th><th>Status</th><th></th></tr></thead><tbody>` +
+    parsedTrailerLocRows.map((r, i) => {
+      const status = r.ambiguous ? `<span class="status-pill amber">On ${shipmentsForTrailerKey(r.trailerKey).length} shipments</span>`
+        : !r.matched ? `<span class="status-pill amber">No matching trailer #</span>`
+        : r.unchanged ? `<span class="status-pill grey">Already set</span>`
+        : `<span class="status-pill green">Will update</span>`;
+      return `<tr>
+        <td class="mono">${escapeHtml(r.trailerNumber)}</td>
+        <td class="mono">${escapeHtml(r.currentZone)}</td>
+        <td>${escapeHtml(r.site)||'—'}</td>
+        <td class="mono">${escapeHtml(r.csNumber)||'—'}</td>
+        <td>${escapeHtml(r.currentLocation)||'—'}</td>
+        <td>${status}</td>
+        <td><button class="del-btn" onclick="removeTrailerLocPreviewRow(${i})" title="Remove row">&times;</button></td>
+      </tr>`;
+    }).join('') + `</tbody>`;
+  const willUpdate = parsedTrailerLocRows.filter(r => r.matched && !r.unchanged).length;
+  document.getElementById('btn-trailerloc-import').textContent = `Update ${willUpdate} Confirmed Location${willUpdate===1?'':'s'}`;
+}
+
+function removeTrailerLocPreviewRow(index){
+  parsedTrailerLocRows.splice(index, 1);
+  if(parsedTrailerLocRows.length === 0){
+    clearTrailerLocPreview({ keepInput: true });
+    return;
+  }
+  renderTrailerLocPreviewTable();
+}
+
+function clearTrailerLocPreview(opts){
+  parsedTrailerLocRows = [];
+  document.getElementById('trailerLocPreviewTable').innerHTML = '';
+  document.getElementById('trailerLocWarnings').innerHTML = '';
+  document.getElementById('trailerLocPreviewWrap').style.display = 'none';
+  if(!opts || !opts.keepInput){
+    document.getElementById('trailerLocPaste').value = '';
+    document.getElementById('trailerLocFile').value = '';
+    document.getElementById('trailerLocFileName').textContent = 'No file selected';
+  }
+}
+
+async function applyTrailerLocRows(){
+  const toApply = parsedTrailerLocRows.filter(r => r.matched && !r.unchanged);
+  if(toApply.length === 0){ showToast('Nothing to update — no matching trailers changed', true); return; }
+  const btn = document.getElementById('btn-trailerloc-import');
+  btn.disabled = true; btn.textContent = 'Updating...';
+  await loadShipments();
+  let updated = 0;
+  for(const r of toApply){
+    // Re-resolve against the freshly loaded board: the preview may be minutes old.
+    const matches = shipmentsForTrailerKey(r.trailerKey);
+    if(matches.length !== 1) continue;
+    const shipment = matches[0];
+    if((shipment.confirmedLocation || '') === r.currentZone) continue;
+    shipment.confirmedLocation = r.currentZone;
+    shipment.dispatchUpdatedAt = nowISO();
+    shipments[shipment.csNumber] = shipment;
+    await saveShipmentRemote(shipment);
+    updated++;
+  }
+  btn.disabled = false;
+  showToast(`Updated confirmed location on ${updated} shipment(s)`);
+  clearTrailerLocPreview();
+  refreshDatalists();
+}
+
 // ---------- CLOSE OUT IMPORT (HEB completion report: ord_refnum / ord_completiondate) ----------
 const HEADER_MAP_CLOSEOUT = {
   'ord_refnum': 'csNumber',
@@ -2096,6 +2308,36 @@ async function applyCloseoutRows(){
   refreshDatalists();
 }
 
+// A re-import used to replace routeStops outright, discarding every Arrived/Completed
+// box and every hand-typed arrival/departure entered since the last import — and then
+// refreshProjectedSchedule rebuilt the projection off the blanked route.
+//
+// Stops are matched by identity (company + city), never by position: if a stop's
+// identity changed, the route genuinely changed and carrying a completion across would
+// mark the wrong store delivered. The report wins wherever it actually has a value;
+// where it's blank or unchecked, whatever is already recorded stands.
+function mergeRouteStops(existingStops, incomingStops){
+  const prior = existingStops || [];
+  const consumed = [];
+  const identity = st => (cleanCarrierCell(st && st.companyName) + '|' + cleanCarrierCell(st && st.city)).toUpperCase();
+  return (incomingStops || []).map(incoming => {
+    const key = identity(incoming);
+    const idx = prior.findIndex((p, i) => consumed.indexOf(i) === -1 && identity(p) === key);
+    if(idx === -1) return incoming;
+    consumed.push(idx);
+    const kept = prior[idx];
+    return {
+      companyName: incoming.companyName,
+      city: incoming.city,
+      earliestDate: incoming.earliestDate || kept.earliestDate || '',
+      arrivalDate: incoming.arrivalDate || kept.arrivalDate || '',
+      departureDate: incoming.departureDate || kept.departureDate || '',
+      arrived: incoming.arrived || !!kept.arrived,
+      completed: incoming.completed || !!kept.completed
+    };
+  });
+}
+
 async function importCarrierRows(){
   const matchedRows = parsedCarrierImportRows.filter(r => r.matched);
   if(matchedRows.length === 0){ showToast('No matching CS# rows to import', true); return; }
@@ -2110,8 +2352,8 @@ async function importCarrierRows(){
     if(r.truckNumber !== null) existing.truckNumber = r.truckNumber;
     if(r.driverName !== null) existing.driverName = r.driverName;
     if(r.routeStops && r.routeStops.length){
-      existing.routeStops = r.routeStops;
-      const shipperDeparture = deriveShipperDepartureTime(r.routeStops);
+      existing.routeStops = mergeRouteStops(existing.routeStops, r.routeStops);
+      const shipperDeparture = deriveShipperDepartureTime(existing.routeStops);
       if(shipperDeparture){
         existing.departureTime = shipperDeparture;
       }
@@ -2142,7 +2384,15 @@ async function importBulk(){
       scheduleRelease: r.scheduleRelease, trailerNumber: r.trailerNumber,
       consignee: r.consignee, currentState: r.currentState, gateOutTime: r.gateOutTime
     };
-    Object.keys(patch).forEach(k => { if(patch[k] !== '') existing[k] = patch[k]; });
+    // A blank cell in a column the report actually carried clears the field; a column the
+    // report didn't carry is left alone. Only applies when a real header row was matched —
+    // under the positional fallback an absent column is indistinguishable from an empty one,
+    // and clearing on a guess would be worse than not clearing at all.
+    const clearable = r.clearable || [];
+    Object.keys(patch).forEach(k => {
+      if(patch[k] !== '') existing[k] = patch[k];
+      else if(clearable.indexOf(k) !== -1) existing[k] = '';
+    });
     stampCompletion(existing, previousState);
     existing.dispatchUpdatedAt = nowISO();
     shipments[cs] = existing;
@@ -2371,6 +2621,14 @@ async function deleteShipment(cs){
   showToast('Deleted ' + cs);
 }
 
+// Replacing #logContent's innerHTML removes whatever input has focus, and removing a
+// focused element fires blur — which ran the inline-edit save handlers with whatever was
+// half-typed at that moment, and re-entered renderLog from inside its own innerHTML
+// assignment. Last Location survived on validation; Confirmed Location has none, so the
+// 30s poll could commit a partial location to the database on its own. This flag marks
+// "this blur came from a re-render, not from a person" and the handlers stand down.
+let suppressInlineCommit = false;
+
 const openHistoryIds = new Set();
 function toggleHistory(cs){
   const row = document.getElementById('hist-'+cs);
@@ -2492,6 +2750,7 @@ function isLateDeparture(s){
 }
 
 async function updateConfirmedLocation(cs, value){
+  if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
   const s = shipments[cs];
   if(!s) return;
   value = caps(value);
@@ -2504,6 +2763,7 @@ async function updateConfirmedLocation(cs, value){
 }
 
 async function updateDepartureTime(cs, value){
+  if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
   const s = shipments[cs];
   if(!s) return;
   value = value.trim();
@@ -2721,6 +2981,7 @@ async function estimateNextLegEta(shipment, fromLocation){
 }
 
 async function updateLastLocationFromLog(cs, value){
+  if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
   const s = shipments[cs];
   if(!s) return;
   value = caps(value);
@@ -2756,6 +3017,7 @@ async function refreshProjectedSchedule(s){
 }
 
 async function updateRouteStopField(cs, index, field, value){
+  if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
   const s = shipments[cs];
   if(!s || !s.routeStops || !s.routeStops[index]) return;
   const stop = s.routeStops[index];
@@ -3210,6 +3472,11 @@ function renderLog(){
   const activeEl = document.activeElement;
   const activeId = activeEl && activeEl.id;
   const selStart = activeEl && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+  // The 30s poll re-renders from stored state. Restoring focus alone put the caret back
+  // in an input whose value had just been reset underneath it, so a half-typed
+  // "SAN ANTON" vanished mid-keystroke every thirty seconds. Carry the in-progress
+  // value across the rebuild — the person typing it beats the last saved value.
+  const activeValue = activeEl && typeof activeEl.value === 'string' ? activeEl.value : null;
 
   const search = (document.getElementById('searchInput').value||'').toLowerCase();
   const statusF = document.getElementById('statusFilter').value;
@@ -3310,6 +3577,7 @@ function renderLog(){
     const late = isLateDeparture(s);
     const hasHistory = routeStops.length || updates.length || stopNums.length || late;
     const expanded = openHistoryIds.has(s.csNumber);
+    const domCs = sanitizeKey(s.csNumber); // stable element ids so a re-render can put focus back
     html += `<tr class="${rowCls}">
       <td>${hasHistory ? `<button class="expand-btn" id="expander-${escapeAttr(sanitizeKey(s.csNumber))}" onclick="toggleHistory('${s.csNumber}')" title="Expand shipment details">${expanded ? '&minus;' : '+'}</button>` : ''}</td>
       <td class="mono">${s.csNumber}</td>
@@ -3319,12 +3587,12 @@ function renderLog(){
       <td><span class="status-pill ${pickup.cls}">${pickup.label}</span></td>
       <td class="mono">${s.trailerNumber||'—'}</td>
       <td title="${escapeAttr(s.consignee||'')}">${s.consignee||'—'}</td>
-      <td><input type="text" class="inline-edit" value="${(s.confirmedLocation||'').replace(/"/g,'&quot;')}" placeholder="Not confirmed" onblur="updateConfirmedLocation('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td><input type="text" id="conf-${domCs}" class="inline-edit" value="${escapeAttr(s.confirmedLocation||'')}" placeholder="Not confirmed" onblur="updateConfirmedLocation('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
       <td class="col-seam">${renderLogEmptyTrailerCell(s)}</td>
       <td class="mono">${s.truckNumber||'—'}</td>
       <td title="${escapeAttr(s.driverName||'')}">${s.driverName||'—'}</td>
-      <td><input type="time" class="inline-edit" value="${escapeAttr(departedTime)}" onblur="updateDepartureTime('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}">${late ? `<button class="late-badge" onclick="toggleHistory('${s.csNumber}')" title="Late departure — click for reason">Late</button>` : ''}</td>
-      <td class="cell-live cell-live-start"><input type="text" class="inline-edit${lastLocationStale ? ' stale-prompt' : ''}" value="${escapeAttr(lastLocationStale ? '' : (last ? last.location||'' : ''))}" placeholder="${lastLocationStale ? 'Needs update — City, ST' : 'City, ST'}" onblur="updateLastLocationFromLog('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td><input type="time" id="dep-${domCs}" class="inline-edit" value="${escapeAttr(departedTime)}" onblur="updateDepartureTime('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}">${late ? `<button class="late-badge" onclick="toggleHistory('${s.csNumber}')" title="Late departure — click for reason">Late</button>` : ''}</td>
+      <td class="cell-live cell-live-start"><input type="text" id="loc-${domCs}" class="inline-edit${lastLocationStale ? ' stale-prompt' : ''}" value="${escapeAttr(lastLocationStale ? '' : (last ? last.location||'' : ''))}" placeholder="${lastLocationStale ? 'Needs update — City, ST' : 'City, ST'}" onblur="updateLastLocationFromLog('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
       <td class="cell-live cell-live-end cell-eta mono">${lastLocationStale ? '<span class="status-pill red">Needs Update</span>' : (last ? last.eta||'—' : '—')}</td>
       <td><span class="status-pill ${meta.cls}">${meta.label}</span></td>
       <td>
@@ -3344,7 +3612,12 @@ function renderLog(){
     </td></tr>`;
   });
   html += `</tbody></table>`;
-  content.innerHTML = html;
+  suppressInlineCommit = true;
+  try{
+    content.innerHTML = html;
+  } finally {
+    suppressInlineCommit = false;
+  }
   openHistoryIds.forEach(cs => {
     const row = document.getElementById('hist-'+cs);
     if(row) row.style.display = 'table-row';
@@ -3353,6 +3626,7 @@ function renderLog(){
   if(activeId){
     const el = document.getElementById(activeId);
     if(el){
+      if(activeValue !== null && typeof el.value === 'string' && el.value !== activeValue) el.value = activeValue;
       el.focus();
       if(selStart !== null && el.setSelectionRange){
         try{ el.setSelectionRange(selStart, selStart); }catch(e){ /* input type doesn't support it */ }
@@ -3546,6 +3820,7 @@ async function initApp(){
   setupDropZone('emptyBulkDropZone', 'emptyBulkPaste', 'emptyBulkFileName', previewEmptyBulk);
   setupDropZone('carrierImportDropZone', 'carrierImportPaste', 'carrierImportFileName', previewCarrierImport);
   setupDropZone('closeoutDropZone', 'closeoutPaste', 'closeoutFileName', previewCloseoutImport);
+  setupDropZone('trailerLocDropZone', 'trailerLocPaste', 'trailerLocFileName', previewTrailerLocImport);
   await loadShipments();
   await loadEmptyTrailers();
   await checkAndArchiveCompleted();
@@ -3561,7 +3836,11 @@ async function initApp(){
     await loadShipments();
     const archivedCount = await checkAndArchiveCompleted();
     const logView = document.getElementById('view-log');
-    if(logView && logView.style.display !== 'none'){
+    // Don't redraw the board out from under someone mid-edit. The data is already
+    // refreshed; the next render (their own blur, a sort, a filter) will show it.
+    const editing = document.activeElement && document.activeElement.classList
+      && document.activeElement.classList.contains('inline-edit');
+    if(logView && logView.style.display !== 'none' && !editing){
       renderLog();
     }
     if(archivedCount > 0) showToast(archivedCount + ' load(s) moved to History');

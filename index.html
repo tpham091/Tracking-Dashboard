@@ -1613,6 +1613,35 @@ function mappedRowFromCells(cells, colMap){
   return row;
 }
 
+// Does this cell hold a shipment reference, as opposed to a date, a time, a company
+// name or a city? Deliberately format-agnostic: a compact token carrying at least one
+// digit and no whitespace. The previous test for a new block was /^CS\d+$/, which meant
+// any other reference format the report might use — a bare number, CS-12345, a REF
+// prefix — never registered as a new block at all.
+//
+// refColumnIsStopDate says the reference column overlaps one of the stop-date columns,
+// which is the only situation where a bare Excel date serial could pass for a reference.
+// The serial check is scoped to that case so a genuine five-digit reference isn't
+// rejected for happening to fall in serial range.
+function looksLikeReferenceToken(value, refColumnIsStopDate){
+  const text = cleanCarrierCell(value);
+  if(!text || /\s/.test(text)) return false;
+  if(text.length < 3 || text.length > 24) return false;
+  if(!/\d/.test(text)) return false;
+  if(!/^[A-Za-z0-9._\/-]+$/.test(text)) return false;
+  if(/^\d{1,2}[:.]\d{2}/.test(text)) return false;            // a time
+  if(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(text)) return false;  // a date
+  if(refColumnIsStopDate && excelSerialParts(text)) return false;
+  return true;
+}
+
+function referenceColumnIsStopDate(mainMap, stopMap){
+  if(!stopMap) return false;
+  const refIdx = Object.keys(mainMap).find(idx => mainMap[idx] === 'csNumber');
+  if(refIdx === undefined) return false;
+  return ['earliestDate','arrivalDate','departureDate'].indexOf(stopMap[refIdx]) !== -1;
+}
+
 function extractCarrierImportRows(raw){
   const rows = parseDelimitedRows(raw);
   const byCs = new Map();
@@ -1639,10 +1668,11 @@ function extractCarrierImportRows(raw){
     // header. Without this check, a new shipment's main row would get read through
     // the previous shipment's leftover stop-column mapping and its stops would bleed
     // into the wrong CS#. So: does this row's mainMap-mapped column actually hold a
-    // real CS# that isn't the one we're already on? Then it's a new block, header or not.
+    // reference that isn't the one we're already on? Then it's a new block, header or not.
     const probeRow = mappedRowFromCells(cells, mainMap);
     const probeCs = cleanCarrierCell(probeRow.csNumber);
-    const looksLikeNewCs = /^CS\d+$/i.test(probeCs) && probeCs.toUpperCase() !== currentCs.toUpperCase();
+    const looksLikeNewCs = looksLikeReferenceToken(probeCs, referenceColumnIsStopDate(mainMap, stopMap))
+      && probeCs.toUpperCase() !== currentCs.toUpperCase();
 
     if(stopMap && currentCs && byCs.has(currentCs) && !looksLikeNewCs){
       const stopRow = mappedRowFromCells(cells, stopMap);
@@ -1659,8 +1689,12 @@ function extractCarrierImportRows(raw){
       return;
     }
 
-    if(looksLikeNewCs) stopMap = null; // fresh block — leftover stop mapping no longer applies
-    const mainRow = looksLikeNewCs ? probeRow : mappedRowFromCells(cells, mainMap);
+    // stopMap is deliberately NOT cleared here. When a report carries one stop header for
+    // several back-to-back blocks — the layout this whole branch exists to handle — that
+    // mapping is exactly what the next block's stop rows need. Clearing it dropped every
+    // stop after the first block. A genuine new stop header still replaces it above, and
+    // a repeated main header still clears it.
+    const mainRow = probeRow;
     const cs = cleanCarrierCell(mainRow.csNumber);
     if(cs && !/^ref\s*#?$/i.test(cs) && !/^cs\s*(#|number)?$/i.test(cs)){
       currentCs = cs;

@@ -1145,9 +1145,44 @@ function setupDropZone(zoneId, targetTextareaId, labelId, previewFn){
   });
 }
 
+// Counts a delimiter only where it actually separates fields \u2014 commas inside a quoted
+// company name shouldn't vote for comma being the delimiter.
+function countOutsideQuotes(line, delimiter){
+  let count = 0, inQuotes = false;
+  for(let i = 0; i < line.length; i++){
+    const ch = line[i];
+    if(ch === '"' && inQuotes && line[i+1] === '"'){ i++; continue; }
+    if(ch === '"'){ inQuotes = !inQuotes; continue; }
+    if(ch === delimiter && !inQuotes) count++;
+  }
+  return count;
+}
+
+// Picks the delimiter on evidence from many lines instead of whichever character
+// happened to appear in the first one. A tab-separated export with a plain title line
+// above the header used to be read as CSV \u2014 every row collapsing into a single cell \u2014
+// and one stray tab in a CSV flipped it the other way. The winner is the delimiter whose
+// column count is consistent across the most lines, then the one splitting into more
+// columns.
+function detectDelimiter(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim()).slice(0, 25);
+  if(lines.length === 0) return ',';
+  let best = ',', bestScore = -1;
+  ['\t', ','].forEach(delimiter => {
+    const counts = lines.map(l => countOutsideQuotes(l, delimiter)).filter(c => c > 0);
+    if(counts.length === 0) return;
+    const freq = {};
+    counts.forEach(c => { freq[c] = (freq[c] || 0) + 1; });
+    const modal = Object.keys(freq).map(Number).sort((a, b) => freq[b] - freq[a] || b - a)[0];
+    const score = freq[modal] * 1000 + modal; // agreement first, then width
+    if(score > bestScore){ bestScore = score; best = delimiter; }
+  });
+  return best;
+}
+
 function parseDelimitedRows(raw){
   const text = String(raw || '').replace(/^\uFEFF/, '');
-  const delimiter = text.split(/\r?\n/).find(l => l.trim())?.includes('\t') ? '\t' : ',';
+  const delimiter = detectDelimiter(text);
   const rows = [];
   let row = [], cell = '', inQuotes = false;
   for(let i = 0; i < text.length; i++){
@@ -1176,24 +1211,58 @@ function parseDelimitedRows(raw){
   return rows;
 }
 
+// Canonical form for a header cell. Reports print the same column a dozen ways —
+// "Trailer #", "Trailer#", "TRAILER_#", "Trailer #:", a non-breaking space from a paste —
+// and a miss here doesn't fail loudly, it silently drops the column while the other
+// headers still match, so the import looks fine and the data is just missing.
 function normalizeHeader(s){
-  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return String(s || '')
+    .replace(/ /g, ' ')
+    .replace(/_/g, ' ')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .replace(/[:*]+$/, '')
+    .toLowerCase()
+    .replace(/\s*#\s*/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Runs a header map's own keys through the same canonicalization, so the map can be
+// written readably ('trailer #') and still match whatever spelling the export uses.
+function canonicalHeaderMap(map){
+  const out = {};
+  Object.keys(map).forEach(k => { out[normalizeHeader(k)] = map[k]; });
+  return out;
+}
+
+// Reports don't reliably start with their header row — exports carry title lines, run
+// dates, blank rows. Scanning finds the best-matching header wherever it sits, instead
+// of testing row 0 and otherwise falling through to positional mapping, which imported
+// the header row itself as a shipment called "Shipment ID".
+function findHeaderRowIndex(rows, headerMap, minHeaderHits, maxScan){
+  let bestIndex = -1, bestHits = 0;
+  const limit = Math.min(rows.length, maxScan || 12);
+  for(let i = 0; i < limit; i++){
+    const hits = rows[i].map(normalizeHeader).filter(c => headerMap[c]).length;
+    if(hits > bestHits){ bestHits = hits; bestIndex = i; }
+  }
+  return bestHits >= (minHeaderHits || 2) ? bestIndex : -1;
 }
 
 function mapRows(raw, headerMap, defaultIndexMap, minHeaderHits){
   const rows = parseDelimitedRows(raw);
-  if(rows.length === 0) return { mappedRows: [], skipped: 0 };
-  const firstCols = rows[0].map(normalizeHeader);
-  const headerHits = firstCols.filter(c => headerMap[c]).length;
+  if(rows.length === 0) return { mappedRows: [], fields: [], usedHeader: false, skipped: 0 };
+  const headerIndex = findHeaderRowIndex(rows, headerMap, minHeaderHits);
   const colMap = {};
   let dataRows = rows;
-  if(headerHits >= (minHeaderHits || 2)){
-    firstCols.forEach((c,i) => { if(headerMap[c]) colMap[i] = headerMap[c]; });
-    dataRows = rows.slice(1);
+  if(headerIndex !== -1){
+    rows[headerIndex].map(normalizeHeader).forEach((c,i) => { if(headerMap[c]) colMap[i] = headerMap[c]; });
+    dataRows = rows.slice(headerIndex + 1); // anything above the header is preamble
   } else {
     Object.assign(colMap, defaultIndexMap);
   }
-  const usedHeader = headerHits >= (minHeaderHits || 2);
+  const usedHeader = headerIndex !== -1;
   return {
     mappedRows: dataRows.map(cells => {
       const row = {};
@@ -1274,13 +1343,13 @@ async function deleteEmptyTrailerRemote(id){
   }
 }
 
-const HEADER_MAP_EMPTY = {
+const HEADER_MAP_EMPTY = canonicalHeaderMap({
   'trailer info': 'trailerInfo', 'trailer #': 'trailerInfo', 'trailer': 'trailerInfo',
   'current zone': 'currentZone', 'zone': 'currentZone',
   'site': 'site',
   'carrier': 'carrier',
   'trailer profile': 'trailerProfile', 'profile': 'trailerProfile'
-};
+});
 const DEFAULT_INDEX_MAP_EMPTY = {0:'trailerInfo', 1:'currentZone', 2:'site', 3:'carrier', 4:'trailerProfile'};
 
 let parsedEmptyRows = [];
@@ -1604,15 +1673,16 @@ function setCarrierMode(mode){
 }
 
 // Maps the outbound report's known header names (lowercased) to our fields.
-const HEADER_MAP = {
-  'warehouse code': 'commodityShipper',
-  'shipment id': 'csNumber',
-  'store #': 'storeNumber', 'store': 'storeNumber', 'store number': 'storeNumber',
-  'trailer #': 'trailerNumber', 'trailer': 'trailerNumber',
+const HEADER_MAP = canonicalHeaderMap({
+  'warehouse code': 'commodityShipper', 'whse code': 'commodityShipper', 'warehouse': 'commodityShipper',
+  'shipment id': 'csNumber', 'shipment #': 'csNumber', 'shipment number': 'csNumber', 'shipment': 'csNumber',
+  'store #': 'storeNumber', 'store': 'storeNumber', 'store number': 'storeNumber', 'store no': 'storeNumber',
+  'trailer #': 'trailerNumber', 'trailer': 'trailerNumber', 'trailer number': 'trailerNumber', 'trailer no': 'trailerNumber',
   'schedule release time': 'scheduleRelease', 'scheduled release time': 'scheduleRelease', 'release': 'scheduleRelease',
-  'current state': 'currentState',
-  'gate out time': 'gateOutTime'
-};
+  'release time': 'scheduleRelease', 'schedule release': 'scheduleRelease',
+  'current state': 'currentState', 'state': 'currentState', 'status': 'currentState',
+  'gate out time': 'gateOutTime', 'gate out': 'gateOutTime'
+});
 // Fallback column order when no recognizable header row is pasted (matches the current C3
 // Outbound List export: Site, Warehouse Code, Origin Warehouse, Shipment ID, Store #,
 // Requested Trailer Type, Executed Trailer Type, Trailer #, Schedule Release Time, Current State, ...).
@@ -1746,15 +1816,15 @@ function clearBulkPreview(opts){
   }
 }
 
-const HEADER_MAP_CARRIER_IMPORT = {
+const HEADER_MAP_CARRIER_IMPORT = canonicalHeaderMap({
   'ref #': 'csNumber', 'ref#': 'csNumber', 'reference #': 'csNumber',
   'cs#': 'csNumber', 'cs #': 'csNumber', 'cs': 'csNumber', 'cs number': 'csNumber', 'shipment id': 'csNumber',
   'trk#': 'truckNumber', 'trk #': 'truckNumber', 'truck #': 'truckNumber', 'truck#': 'truckNumber',
   'truck': 'truckNumber', 'truck number': 'truckNumber', 'tractor': 'truckNumber',
-  'driver name': 'driverName', 'driver': 'driverName', 'driver1': 'driverName'
-};
+  'driver name': 'driverName', 'driver': 'driverName', 'driver1': 'driverName', 'driver 1': 'driverName'
+});
 const DEFAULT_INDEX_MAP_CARRIER_IMPORT = {2:'truckNumber', 4:'csNumber', 8:'driverName'};
-const HEADER_MAP_CARRIER_STOPS = {
+const HEADER_MAP_CARRIER_STOPS = canonicalHeaderMap({
   'companyname': 'companyName', 'company name': 'companyName',
   'city': 'city',
   'earliestdate': 'earliestDate', 'earliest date': 'earliestDate',
@@ -1762,7 +1832,7 @@ const HEADER_MAP_CARRIER_STOPS = {
   'departuredate': 'departureDate', 'departure date': 'departureDate',
   'arrived': 'arrived',
   'completed': 'completed'
-};
+});
 
 let parsedCarrierImportRows = [];
 let parsedCloseoutRows = [];
@@ -1929,7 +1999,12 @@ function extractCarrierImportRows(raw){
     const headers = cells.map(normalizeHeader);
     const mainHits = headers.filter(c => HEADER_MAP_CARRIER_IMPORT[c]).length;
     const stopHits = headers.filter(c => HEADER_MAP_CARRIER_STOPS[c]).length;
-    if(stopHits >= 4){
+    // A stop header exporting only Company/City/Arrival/Departure — without Earliest,
+    // Arrived and Completed — never reached the old threshold of 4, so it was not
+    // recognized as a header at all and every stop row under it fell through to
+    // main-row parsing. Three is enough to identify one, and requiring it to out-match
+    // the main map keeps a main header from being read as a stop header.
+    if(stopHits >= 3 && stopHits >= mainHits){
       stopMap = headerIndexMap(headers, HEADER_MAP_CARRIER_STOPS);
       return;
     }
@@ -2049,7 +2124,7 @@ function clearCarrierImportPreview(opts){
 // its Current Zone is where NFI's driver will find it — that zone becomes the shipment's
 // Confirmed Trailer Location, matched by Trailer #. Any other workflow state means the
 // trailer isn't staged yet, so it carries no location worth publishing.
-const HEADER_MAP_TRAILER_LOC = {
+const HEADER_MAP_TRAILER_LOC = canonicalHeaderMap({
   'trailer #':'trailerNumber', 'trailer#':'trailerNumber', 'trailer':'trailerNumber',
   'trailer no':'trailerNumber', 'trailer number':'trailerNumber', 'trailer info':'trailerNumber',
   'current zone':'currentZone', 'zone':'currentZone',
@@ -2057,7 +2132,7 @@ const HEADER_MAP_TRAILER_LOC = {
   'site':'site',
   'warehouse code':'warehouseCode',
   'trailer comment':'trailerComment', 'comment':'trailerComment'
-};
+});
 // Column order of the current DCS export, used only when no header row is recognized.
 const DEFAULT_INDEX_MAP_TRAILER_LOC = {0:'site', 1:'currentZone', 3:'trailerNumber', 7:'workflowState', 8:'warehouseCode', 17:'trailerComment'};
 
@@ -2208,10 +2283,10 @@ async function applyTrailerLocRows(){
 }
 
 // ---------- CLOSE OUT IMPORT (HEB completion report: ord_refnum / ord_completiondate) ----------
-const HEADER_MAP_CLOSEOUT = {
+const HEADER_MAP_CLOSEOUT = canonicalHeaderMap({
   'ord_refnum': 'csNumber',
   'ord_completiondate': 'completionDate',
-};
+});
 
 function extractCloseoutRows(raw){
   const { mappedRows } = mapRows(raw, HEADER_MAP_CLOSEOUT, {}, 2);

@@ -1981,6 +1981,13 @@ function looksLikeReferenceToken(value, refColumnIsStopDate){
   return true;
 }
 
+// Shape of a reference with digit runs collapsed: "CS10149969" -> "AA#", "8842137" -> "#",
+// "HEBHOU17" -> "AAAAAA#". Digit runs collapse so a reference series of varying length
+// still matches itself, while the letter pattern stays distinguishing.
+function referenceShape(text){
+  return String(text || '').toUpperCase().replace(/[0-9]+/g, '#').replace(/[A-Z]/g, 'A');
+}
+
 function referenceColumnIsStopDate(mainMap, stopMap){
   if(!stopMap) return false;
   const refIdx = Object.keys(mainMap).find(idx => mainMap[idx] === 'csNumber');
@@ -1995,6 +2002,13 @@ function extractCarrierImportRows(raw){
   let stopMap = null;
   let currentCs = '';
   let skipped = 0;
+  // The shape of this report's references, learned from a row that is provably a main
+  // row — the one directly under a main header. Mid-file block detection then only
+  // accepts a value of that same shape. Without this, the stop grid's CompanyID column
+  // ("HEBHOU17", "W00405", "001CLE") sits at the same index as Ref #, and every stop row
+  // was read as the start of a new shipment.
+  let refShape = '';
+  let expectMainRow = false;
   rows.forEach(cells => {
     const headers = cells.map(normalizeHeader);
     const mainHits = headers.filter(c => HEADER_MAP_CARRIER_IMPORT[c]).length;
@@ -2011,6 +2025,7 @@ function extractCarrierImportRows(raw){
     if(mainHits >= 2){
       mainMap = headerIndexMap(headers, HEADER_MAP_CARRIER_IMPORT);
       stopMap = null;
+      expectMainRow = true; // whatever follows this header is a main row by construction
       return;
     }
 
@@ -2022,7 +2037,15 @@ function extractCarrierImportRows(raw){
     // reference that isn't the one we're already on? Then it's a new block, header or not.
     const probeRow = mappedRowFromCells(cells, mainMap);
     const probeCs = cleanCarrierCell(probeRow.csNumber);
-    const looksLikeNewCs = looksLikeReferenceToken(probeCs, referenceColumnIsStopDate(mainMap, stopMap))
+    if(expectMainRow && probeCs){
+      if(!refShape) refShape = referenceShape(probeCs);
+      expectMainRow = false;
+    }
+    // A new block mid-file has to look like this report's own references, not merely like
+    // some token with a digit in it.
+    const looksLikeNewCs = !!refShape
+      && referenceShape(probeCs) === refShape
+      && looksLikeReferenceToken(probeCs, referenceColumnIsStopDate(mainMap, stopMap))
       && probeCs.toUpperCase() !== currentCs.toUpperCase();
 
     if(stopMap && currentCs && byCs.has(currentCs) && !looksLikeNewCs){

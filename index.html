@@ -68,6 +68,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:'Inter',sans-ser
 .drop-copy{display:flex;flex-direction:column;gap:3px;}
 .drop-title{font-size:13.5px;font-weight:800;color:var(--ink);}
 .drop-sub{font-size:12.5px;color:var(--ink-soft);}
+.field-note{font-size:11.5px;font-weight:600;color:var(--amber);background:var(--amber-bg);border-radius:5px;padding:5px 8px;margin-top:2px;}
 .warn-box{background:var(--amber-bg);color:var(--amber);border-radius:7px;padding:9px 12px;font-size:12.5px;font-weight:600;margin-bottom:10px;}
 #bulkPreviewTable th{position:sticky;top:0;}
 .conn-banner{background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:8px;padding:11px 14px;font-size:13px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:10px;}
@@ -155,6 +156,11 @@ tr.row-terminal:hover{opacity:0.8;filter:grayscale(20%);}
 .nlt-header{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;text-transform:uppercase;letter-spacing:0.4px;color:var(--red);margin-bottom:10px;display:flex;align-items:center;gap:8px;}
 .nlt-count{background:var(--red);color:#fff;font-family:'Inter',sans-serif;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;}
 .nlt-empty{font-size:13px;color:var(--green);font-weight:600;}
+.nlt-card.nlt-clear{border-color:var(--green);background:var(--green-bg);}
+.nlt-card.nlt-clear .nlt-header{color:var(--green);}
+.nlt-card.nlt-clear .nlt-count{background:var(--green);}
+.nlt-item-unverified{color:var(--ink-soft);}
+.nlt-detail-muted{color:var(--ink-soft);font-weight:600;}
 .nlt-item{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px dashed rgba(181,52,42,0.25);font-size:12.5px;flex-wrap:wrap;}
 .nlt-item:last-child{border-bottom:none;}
 .nlt-detail{color:var(--red);font-weight:700;margin-left:auto;}
@@ -282,7 +288,7 @@ th.sortable:hover{color:var(--steel);}
         </div>
         <div class="f-field span2">
           <label>Commodity / Shipper</label>
-          <input type="text" id="d-commodity" list="commodityList" placeholder="227 - Super Regional">
+          <input type="text" id="d-commodity" list="commodityList" placeholder="227 - Super Regional" oninput="checkCommodityWarehouse()" onchange="checkCommodityWarehouse()">
           <datalist id="commodityList">
             <option value="227 - Super Regional">
             <option value="404 - San Marcos">
@@ -293,6 +299,7 @@ th.sortable:hover{color:var(--steel);}
             <option value="203 - SA Combo">
             <option value="SA - Frozen">
           </datalist>
+          <div class="field-note" id="d-commodity-note" style="display:none;"></div>
         </div>
         <div class="f-field">
           <label>Date</label>
@@ -1294,6 +1301,26 @@ async function handleEmptyTrailerChange(){
   rebuildEmptyDropdownOptions();
 }
 
+// Advisory only — never blocks the save. The warehouse # read out of this field is what
+// every NLT lookup keys on, and the outbound import overwrites the field anyway, so a
+// hard validation here would stop dispatch without actually guaranteeing anything.
+function checkCommodityWarehouse(){
+  const input = document.getElementById('d-commodity');
+  const note = document.getElementById('d-commodity-note');
+  if(!input || !note) return;
+  const value = input.value.trim();
+  if(!value){ note.style.display = 'none'; return; }
+  const wh = resolveWarehouseNumber({ commodityShipper: value });
+  if(wh.status === 'ok'){
+    note.style.display = 'none';
+    return;
+  }
+  note.style.display = 'block';
+  note.textContent = wh.status === 'ambiguous'
+    ? 'More than one warehouse # in this text — NLT deadlines can\'t be matched until it\'s one.'
+    : 'No known warehouse # here — this load saves fine, but NLT deadlines won\'t be checked.';
+}
+
 function setDispatchMode(mode){
   document.getElementById('mode-single').classList.toggle('active', mode==='single');
   document.getElementById('mode-bulk').classList.toggle('active', mode==='bulk');
@@ -1992,6 +2019,18 @@ async function submitUpdate(){
   if(location || eta){
     existing.updates = existing.updates || [];
     existing.updates.push({ timestamp: nowISO(), location, eta });
+    // The Tracking Log's inline Last Location field recomputes the projection; this tab
+    // never did, so a load updated from here kept an ETA and NLT verdict built off
+    // wherever the truck was several check calls ago. Recompute from the same path.
+    if(location){
+      await refreshProjectedSchedule(existing);
+      const firstLeg = (existing.projectedSchedule || [])[0];
+      // A hand-typed ETA is left alone — the driver may know something the projection
+      // doesn't. Only fill it in when the dispatcher didn't supply one.
+      if(!eta && firstLeg){
+        existing.updates[existing.updates.length - 1].eta = firstLeg.arrival;
+      }
+    }
   }
 
   if(stopNum && (arrival || departure)){
@@ -2360,16 +2399,24 @@ async function driveMinutesBetween(fromKey, toKey){
 // starting from fromLocation and chaining leg to leg. Each leg tries Mapbox drive time
 // first, falls back to straight-line distance, and if neither works falls back to the
 // TMW-planned time for that stop — so the chain never breaks, it just gets less precise.
-async function projectRemainingSchedule(shipment, fromLocation){
+async function projectRemainingSchedule(shipment, fromLocation, sinceISO){
   const stops = shipment.routeStops || [];
   const firstStop = findNextEtaStop(shipment, fromLocation);
   if(!firstStop) return [];
   const firstIndex = stops.indexOf(firstStop);
   const remaining = stops.slice(firstIndex).filter(st => !st.completed);
-  const warehouse = extractWarehouseNumber(shipment);
 
   let fromKey = cityKey(fromLocation);
-  let clock = new Date();
+  // Anchor the projection to WHEN the location was reported, not to whenever this
+  // happens to be recomputed. This runs again on every checkbox click, carrier import
+  // and close-out; starting the clock at "now" off an hours-old ping slid every
+  // projected arrival forward by the age of that ping, each time it ran.
+  const anchorMs = Date.parse(sinceISO || '');
+  let clock = new Date(isNaN(anchorMs) ? Date.now() : anchorMs);
+  // Arrivals are measured in minutes from the start of the anchor day, so a stop reached
+  // after midnight comes through as 1440+ instead of wrapping back to a small number.
+  // isNltAtRisk depends on that: 00:30 tomorrow has to read as "later than 23:00 today".
+  const dayStartMs = new Date(clock.getFullYear(), clock.getMonth(), clock.getDate()).getTime();
   const legs = [];
   for(const stop of remaining){
     const toCity = cityStateForRouteStop(stop);
@@ -2384,19 +2431,20 @@ async function projectRemainingSchedule(shipment, fromLocation){
       if(planned){ clock = planned; source = 'route'; }
       else { clock = new Date(clock.getTime() + ETA_DEFAULT_MIN * 60000); source = 'default'; }
     }
-    const arrivalMin = clock.getHours() * 60 + clock.getMinutes();
+    const arrivalMin = Math.round((clock.getTime() - dayStartMs) / 60000);
     const arrivalLabel = hhmm(clock);
     clock = new Date(clock.getTime() + DWELL_MIN * 60000); // depart after dwell — start of next leg
     const departureLabel = hhmm(clock);
 
-    const corp = extractCorpNumber(stop.companyName);
-    const nltRaw = corp && warehouse && NLT_LOOKUP[corp] ? NLT_LOOKUP[corp][warehouse] : '';
+    const nltInfo = nltEntryFor(shipment, stop);
     legs.push({
       companyName: stop.companyName, toCity,
-      arrival: arrivalLabel, departure: departureLabel,
+      arrival: arrivalLabel, departure: departureLabel, arrivalMin,
       miles, minutes, source,
-      nlt: nltRaw ? formatNltDisplay(nltRaw) : '',
-      nltRisk: nltRaw ? isNltAtRisk(nltRaw, arrivalMin) : false
+      corp: nltInfo.corp, warehouse: nltInfo.warehouse,
+      nlt: nltInfo.status === 'ok' ? formatNltDisplay(nltInfo.nlt) : '',
+      nltStatus: nltInfo.status,
+      nltRisk: nltInfo.status === 'ok' ? isNltAtRisk(nltInfo.nlt, arrivalMin) : false
     });
     fromKey = toKey;
   }
@@ -2423,10 +2471,11 @@ async function updateLastLocationFromLog(cs, value){
     renderLog();
     return;
   }
-  const legs = await projectRemainingSchedule(s, value);
+  const timestamp = nowISO();
+  const legs = await projectRemainingSchedule(s, value, timestamp);
   const eta = legs.length ? legs[0].arrival : addMinutesTime(ETA_DEFAULT_MIN);
   s.projectedSchedule = legs;
-  s.updates = updates.concat([{ timestamp: nowISO(), location: value, eta }]);
+  s.updates = updates.concat([{ timestamp, location: value, eta }]);
   await saveShipmentRemote(s);
   showToast(legs.length ? `Updated ${cs} - ETA ${eta}` : `Updated ${cs} - no next leg ETA found`);
   renderLog();
@@ -2438,8 +2487,10 @@ async function updateLastLocationFromLog(cs, value){
 // a route that's since changed — a stale "wrong trip"-looking alert.
 async function refreshProjectedSchedule(s){
   const updates = s.updates || [];
-  const lastLocation = updates.length ? updates[updates.length - 1].location : '';
-  s.projectedSchedule = lastLocation ? await projectRemainingSchedule(s, lastLocation) : [];
+  const lastUpdate = updates.length ? updates[updates.length - 1] : null;
+  s.projectedSchedule = lastUpdate && lastUpdate.location
+    ? await projectRemainingSchedule(s, lastUpdate.location, lastUpdate.timestamp)
+    : [];
 }
 
 async function updateRouteStopField(cs, index, field, value){
@@ -2497,11 +2548,12 @@ function formatNltTime(value){
   return raw.slice(0, -2).padStart(2, '0') + ':' + raw.slice(-2);
 }
 
+// Returns either the deadline or a short reason it couldn't be resolved, so the stop
+// grid never shows a bare em dash for "we don't know" — that read as "no NLT applies".
 function nltForRouteStop(shipment, stop){
-  const warehouse = extractWarehouseNumber(shipment);
-  const corp = extractCorpNumber(stop && stop.companyName);
-  const nltRaw = corp && warehouse && NLT_LOOKUP[corp] ? NLT_LOOKUP[corp][warehouse] : '';
-  return formatNltTime(nltRaw);
+  const info = nltEntryFor(shipment, stop);
+  if(info.status === 'ok') return formatNltTime(info.nlt);
+  return NLT_STATUS_LABEL[info.status] || '';
 }
 
 function renderRouteStopsDetails(routeStops, shipment){
@@ -2559,10 +2611,64 @@ function handleStopGridNav(event, domCs, index, colName){
   if(target) target.focus();
 }
 
-function extractWarehouseNumber(shipment){
-  const m = String(shipment.commodityShipper || '').match(/\b(\d{3})\b/);
-  return m ? String(parseInt(m[1], 10)) : '';
+// Every warehouse # that actually appears as a key in NLT_LOOKUP (17 of them). The
+// warehouse is read out of free-text commodityShipper, so matching against the real key
+// set beats "first 3-digit token" — that regex silently picked up store numbers, dock
+// numbers, anything numeric that happened to come first, and then indexed a real (but
+// wrong) deadline out of NLT_LOOKUP with full confidence.
+const NLT_WAREHOUSES = (function(){
+  const set = new Set();
+  Object.keys(NLT_LOOKUP).forEach(corp => {
+    Object.keys(NLT_LOOKUP[corp]).forEach(w => set.add(w));
+  });
+  return set;
+})();
+
+// { value, status } rather than a bare string, so callers can tell "no readable
+// warehouse # on this shipment" apart from "this store has no NLT for this warehouse".
+// status: 'ok' | 'none' (no known warehouse # in the text) | 'ambiguous' (more than one).
+// Ambiguous never guesses — a coin-flip between two real warehouses is exactly how a
+// confidently-wrong deadline gets on screen.
+function resolveWarehouseNumber(shipment){
+  const text = String(shipment && shipment.commodityShipper || '');
+  const matches = [];
+  (text.match(/\d+/g) || []).forEach(token => {
+    const normalized = String(parseInt(token, 10));
+    if(NLT_WAREHOUSES.has(normalized) && matches.indexOf(normalized) === -1) matches.push(normalized);
+  });
+  if(matches.length === 1) return { value: matches[0], status: 'ok' };
+  return { value: '', status: matches.length === 0 ? 'none' : 'ambiguous' };
 }
+
+function extractWarehouseNumber(shipment){
+  return resolveWarehouseNumber(shipment).value;
+}
+
+// The single place a stop's NLT is resolved, so the projected schedule, the stop-detail
+// table and the alert panel can't disagree about which deadline applies. A miss comes
+// back with a reason instead of collapsing to '' — "we don't know this deadline" and
+// "this stop has no deadline" used to render identically as an em dash.
+function nltEntryFor(shipment, stop){
+  const wh = resolveWarehouseNumber(shipment);
+  const corp = extractCorpNumber(stop && stop.companyName);
+  if(!corp) return { nlt:'', corp:'', warehouse: wh.value, status:'no-corp' };
+  if(wh.status === 'ambiguous') return { nlt:'', corp, warehouse:'', status:'ambiguous-warehouse' };
+  if(!wh.value) return { nlt:'', corp, warehouse:'', status:'no-warehouse' };
+  const byWarehouse = NLT_LOOKUP[corp];
+  if(!byWarehouse) return { nlt:'', corp, warehouse: wh.value, status:'unknown-corp' };
+  const nlt = byWarehouse[wh.value];
+  if(!nlt) return { nlt:'', corp, warehouse: wh.value, status:'no-pairing' };
+  return { nlt, corp, warehouse: wh.value, status:'ok' };
+}
+
+// Short, cell-sized explanations for why an NLT couldn't be resolved.
+const NLT_STATUS_LABEL = {
+  'no-corp': 'no corp#',
+  'no-warehouse': 'no WH#',
+  'ambiguous-warehouse': 'WH# unclear',
+  'unknown-corp': 'corp not in NLT',
+  'no-pairing': 'no NLT on file'
+};
 
 function extractCorpNumber(text){
   const value = String(text || '');
@@ -2590,13 +2696,6 @@ function cityStateForRouteStop(stop){
   return stop && stop.city || '';
 }
 
-function normalizeCityStateText(value){
-  return String(value || '')
-    .replace(/\//g, '')
-    .replace(/\s+/g, '')
-    .toUpperCase();
-}
-
 function timeStringToMinutes(value){
   const time = normalizeTime(value);
   const m = String(time || '').match(/^(\d{1,2}):(\d{2})$/);
@@ -2612,48 +2711,71 @@ function nltToMinutes(value){
   return hh * 60 + mm;
 }
 
-function findRouteStopForLocation(shipment, location){
-  const loc = normalizeCityStateText(location);
-  if(!loc) return null;
-  return (shipment.routeStops || []).find(st =>
-    extractCorpNumber(st.companyName) &&
-    (normalizeCityStateText(st.city) === loc || normalizeCityStateText(cityStateForRouteStop(st)) === loc)
-  ) || null;
-}
-
 const EARLY_MORNING_CUTOFF_MIN = 720; // 12:00 PM — NLTs before this paired with a later ETA are treated as next-day
+// arrivalMin is minutes from the START OF THE ANCHOR DAY (the day the location was
+// reported), NOT minutes past midnight — an arrival at 00:30 the next morning arrives
+// here as 1470, not 30. Both callers must honour that: passing a wrapped time-of-day
+// made a 00:30 arrival compare as "30" against a 23:00 (1380) deadline and silently
+// come back on-time, which is the wrong direction to be wrong on an overnight 227 run.
+// The deadline itself stays in the anchor day's frame: an early-morning NLT paired with
+// an afternoon-or-later arrival belongs to the following morning.
 function isNltAtRisk(nltRaw, arrivalMin){
   let nltMin = nltToMinutes(nltRaw);
   if(nltMin === null || arrivalMin === null) return false;
   if(nltMin < EARLY_MORNING_CUTOFF_MIN && arrivalMin >= EARLY_MORNING_CUTOFF_MIN) nltMin += 24 * 60;
   return arrivalMin > nltMin;
 }
+
+// Anchor-day arrival minutes for a stored leg. Legs projected before arrivalMin was
+// recorded only carry an "HH:MM" label, so fall back to rolling that against the ping's
+// own time of day: an arrival earlier on the clock than the check call is tomorrow's.
+function legArrivalMinutes(leg, sinceISO){
+  if(leg && typeof leg.arrivalMin === 'number') return leg.arrivalMin;
+  const mins = timeStringToMinutes(leg && leg.arrival);
+  if(mins === null) return null;
+  const anchorMs = Date.parse(sinceISO || '');
+  const anchor = new Date(isNaN(anchorMs) ? Date.now() : anchorMs);
+  const anchorMin = anchor.getHours() * 60 + anchor.getMinutes();
+  return mins < anchorMin ? mins + 24 * 60 : mins;
+}
+
+function isLocationStale(update){
+  return !!(update && update.timestamp && minutesAgo(update.timestamp) >= LAST_LOCATION_STALE_MIN);
+}
 function formatNltDisplay(nltRaw){
   return nltRaw.slice(0, -2).padStart(2, '0') + ':' + nltRaw.slice(-2);
 }
 
+// Reads the leg the ETA was actually computed for. Previously this looked up whichever
+// route stop matched the driver's CURRENT city and compared that stop's deadline against
+// the ETA to the NEXT stop — findNextEtaStop deliberately skips past the same-city stop,
+// so the two were never the same store. It also matched completed stops (a route with
+// two stores in one city matched the delivered one) and returned null outright when the
+// driver reported a highway position, silently switching NLT checking off.
+//
+// The NLT is re-resolved at read time rather than trusted from the stored leg, so a
+// correction to NLT_LOOKUP takes effect immediately and legs projected before nltStatus
+// existed still get checked.
 function getNltMiss(shipment){
   const updates = shipment.updates || [];
-  if(updates.length === 0) return null;
-  const last = updates[updates.length - 1];
-  if(!last || !last.location || !last.eta) return null;
-  const warehouse = extractWarehouseNumber(shipment);
-  if(!warehouse) return null;
-  const stop = findRouteStopForLocation(shipment, last.location);
-  if(!stop) return null;
-  const corp = extractCorpNumber(stop.companyName);
-  const nltRaw = corp && NLT_LOOKUP[corp] ? NLT_LOOKUP[corp][warehouse] : '';
-  if(!nltRaw) return null;
-  const etaMin = timeStringToMinutes(last.eta);
-  if(etaMin === null || !isNltAtRisk(nltRaw, etaMin)) return null;
+  const last = updates.length ? updates[updates.length - 1] : null;
+  if(!last || !last.location) return null;
+  if(isLocationStale(last)) return null; // reported as Unverified instead — see computeNltUnverified
+  const leg = (shipment.projectedSchedule || [])[0];
+  if(!leg) return null;
+  const info = nltEntryFor(shipment, { companyName: leg.companyName });
+  if(info.status !== 'ok') return null;
+  const arrivalMin = legArrivalMinutes(leg, last.timestamp);
+  if(arrivalMin === null || !isNltAtRisk(info.nlt, arrivalMin)) return null;
   return {
     csNumber: shipment.csNumber,
-    warehouse,
-    corp,
-    companyName: stop.companyName,
+    warehouse: info.warehouse,
+    corp: info.corp,
+    companyName: leg.companyName,
     location: last.location,
-    eta: normalizeTime(last.eta),
-    nlt: formatNltDisplay(nltRaw)
+    eta: leg.arrival,
+    nlt: formatNltDisplay(info.nlt),
+    source: leg.source || ''
   };
 }
 
@@ -2672,14 +2794,54 @@ function computeNltAlerts(){
 function computeNltRiskAlerts(){
   const risks = [];
   Object.values(shipments).forEach(s => {
+    const updates = s.updates || [];
+    const last = updates.length ? updates[updates.length - 1] : null;
+    if(!last || !last.location || isLocationStale(last)) return;
     const legs = s.projectedSchedule || [];
     for(let i = 1; i < legs.length; i++){
-      if(legs[i].nltRisk){
-        risks.push({ csNumber: s.csNumber, companyName: legs[i].companyName, arrival: legs[i].arrival, nlt: legs[i].nlt, stopsAhead: i + 1 });
-      }
+      const info = nltEntryFor(s, { companyName: legs[i].companyName });
+      if(info.status !== 'ok') continue;
+      const arrivalMin = legArrivalMinutes(legs[i], last.timestamp);
+      if(arrivalMin === null || !isNltAtRisk(info.nlt, arrivalMin)) continue;
+      risks.push({
+        csNumber: s.csNumber, companyName: legs[i].companyName,
+        arrival: legs[i].arrival, nlt: formatNltDisplay(info.nlt), stopsAhead: i + 1
+      });
     }
   });
   return risks.sort((a,b) => a.csNumber.localeCompare(b.csNumber, undefined, {numeric:true}));
+}
+
+// Third tier: in-transit loads the NLT check could NOT reach a verdict on. These used to
+// be indistinguishable from "clear" — getNltMiss returned null for a stale ping, an
+// unreadable warehouse #, an unmatched stop and a genuinely on-time load alike. Silence
+// about a load nobody can vouch for is the failure mode this panel exists to prevent.
+function computeNltUnverified(){
+  const out = [];
+  Object.values(shipments).forEach(s => {
+    if(getStatus(s) !== 'in_transit') return;
+    const updates = s.updates || [];
+    const last = updates.length ? updates[updates.length - 1] : null;
+    if(!last || !last.location){
+      out.push({ csNumber: s.csNumber, reason: 'No check call logged yet' });
+      return;
+    }
+    if(isLocationStale(last)){
+      out.push({ csNumber: s.csNumber, reason: `Last location ${minutesAgo(last.timestamp)} min old — needs a check call` });
+      return;
+    }
+    const leg = (s.projectedSchedule || [])[0];
+    if(!leg){
+      out.push({ csNumber: s.csNumber, reason: 'No projected next stop from the last location' });
+      return;
+    }
+    const info = nltEntryFor(s, { companyName: leg.companyName });
+    if(info.status !== 'ok'){
+      const why = NLT_STATUS_LABEL[info.status] || 'NLT not resolved';
+      out.push({ csNumber: s.csNumber, reason: `${why} — ${leg.companyName || 'next stop'}` });
+    }
+  });
+  return out.sort((a,b) => a.csNumber.localeCompare(b.csNumber, undefined, {numeric:true}));
 }
 
 function renderNltAlerts(){
@@ -2688,14 +2850,21 @@ function renderNltAlerts(){
   const count = document.getElementById('nltCount');
   const alerts = computeNltAlerts();
   const risks = computeNltRiskAlerts();
-  if(alerts.length === 0 && risks.length === 0){
-    card.style.display = 'none';
-    body.innerHTML = '';
+  const unverified = computeNltUnverified();
+  const inTransit = Object.values(shipments).filter(s => getStatus(s) === 'in_transit').length;
+
+  // The card stays up even when everything is clear. Hiding it made "no NLT exposure"
+  // and "this panel stopped working" look exactly the same on a board people trust.
+  card.style.display = 'block';
+  card.classList.toggle('nlt-clear', alerts.length === 0 && risks.length === 0 && unverified.length === 0);
+  count.textContent = String(alerts.length + risks.length + unverified.length);
+
+  if(alerts.length === 0 && risks.length === 0 && unverified.length === 0){
     count.textContent = '';
+    body.innerHTML = `<div class="nlt-empty">No NLT exposure — ${inTransit} load${inTransit === 1 ? '' : 's'} in transit checked.</div>`;
     return;
   }
-  card.style.display = 'block';
-  count.textContent = String(alerts.length + risks.length);
+
   body.innerHTML = alerts.map(a => `
     <div class="nlt-item">
       <span class="status-pill red">NLT Miss</span>
@@ -2712,6 +2881,12 @@ function renderNltAlerts(){
       <span>${escapeHtml(r.companyName)}</span>
       <span>${r.stopsAhead} stops ahead</span>
       <span class="nlt-detail">Projected arrival ${escapeHtml(r.arrival)} vs NLT ${escapeHtml(r.nlt)}</span>
+    </div>
+  `).join('') + unverified.map(u => `
+    <div class="nlt-item nlt-item-unverified">
+      <span class="status-pill grey">Unverified</span>
+      <span class="mono">${escapeHtml(u.csNumber)}</span>
+      <span class="nlt-detail nlt-detail-muted">${escapeHtml(u.reason)}</span>
     </div>
   `).join('');
 }
@@ -2813,7 +2988,7 @@ function renderLog(){
       : (pickup.key === 'ready to depart' || pickup.key === 'moving' || pickup.key === 'doing errand') ? 'row-soon' : '';
     const updates = s.updates || [];
     const last = updates.length ? updates[updates.length-1] : null;
-    const lastLocationStale = last && last.timestamp && minutesAgo(last.timestamp) >= LAST_LOCATION_STALE_MIN;
+    const lastLocationStale = isLocationStale(last);
     const stopLog = s.stopLog || {};
     const routeStops = s.routeStops || [];
     const stopNums = Object.keys(stopLog);

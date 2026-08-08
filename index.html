@@ -2138,12 +2138,24 @@ const DEFAULT_INDEX_MAP_TRAILER_LOC = {0:'site', 1:'currentZone', 3:'trailerNumb
 
 const READY_TO_DEPART_RE = /^ready\s*to\s*depart$/i;
 
-// Trailer numbers arrive with stray spaces, dashes and leading zeros depending on which
-// system printed them, so compare on a normalized form rather than raw text.
+// The two reports print the same trailer differently: the outbound list (which builds the
+// Tracking Log) carries the carrier prefix — "HEB-9273" — and the DCS yard list prints the
+// bare number — "9273". Keying on the punctuation-stripped text matched none of them.
+// The join key is therefore the numeric core, with leading zeros dropped; a value with no
+// trailing digits at all falls back to its alphanumeric form.
 function trailerKey(value){
   const text = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if(!text) return '';
-  return /^\d+$/.test(text) ? String(parseInt(text, 10)) : text;
+  const m = text.match(/^[A-Z]*?0*(\d+)$/);
+  return m ? m[1] : text;
+}
+
+// The carrier prefix, kept aside so that two trailers sharing a number under different
+// carriers ("HEB-1234" vs "PARKWAY-1234") can still be told apart.
+function trailerPrefix(value){
+  const text = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const m = text.match(/^([A-Z]+)0*\d+$/);
+  return m ? m[1] : '';
 }
 
 let parsedTrailerLocRows = [];
@@ -2172,10 +2184,19 @@ function extractTrailerLocRows(raw){
   return { rows, notReady, noZone, skipped };
 }
 
-// Shipments carrying a given trailer #. More than one is not resolved by guessing —
+// Shipments on the Tracking Log carrying a given trailer. The board is the only source of
+// the CS# — this report has none — so the match is trailer # on the report against
+// trailer # already on the log. More than one survivor is not resolved by guessing:
 // writing a staging zone onto the wrong load sends a driver to the wrong trailer.
-function shipmentsForTrailerKey(key){
-  return Object.values(shipments).filter(s => trailerKey(s.trailerNumber) === key);
+function shipmentsForTrailerKey(key, reportTrailer){
+  const all = Object.values(shipments).filter(s => trailerKey(s.trailerNumber) === key);
+  if(all.length <= 1) return all;
+  // Same number under two carriers — let the report's own prefix decide, but only when
+  // it actually narrows it to one.
+  const prefix = trailerPrefix(reportTrailer);
+  if(!prefix) return all;
+  const exact = all.filter(s => trailerPrefix(s.trailerNumber) === prefix);
+  return exact.length === 1 ? exact : all;
 }
 
 async function previewTrailerLocImport(){
@@ -2184,7 +2205,7 @@ async function previewTrailerLocImport(){
   await loadShipments();
   const result = extractTrailerLocRows(raw);
   parsedTrailerLocRows = result.rows.map(r => {
-    const matches = shipmentsForTrailerKey(r.trailerKey);
+    const matches = shipmentsForTrailerKey(r.trailerKey, r.trailerNumber);
     const current = matches.length === 1 ? (matches[0].confirmedLocation || '') : '';
     return {
       ...r,
@@ -2218,7 +2239,7 @@ function renderTrailerLocPreviewTable(){
   const table = document.getElementById('trailerLocPreviewTable');
   table.innerHTML = `<thead><tr><th>Trailer #</th><th>Current Zone</th><th>Site</th><th>Matched CS#</th><th>Confirmed Location Now</th><th>Status</th><th></th></tr></thead><tbody>` +
     parsedTrailerLocRows.map((r, i) => {
-      const status = r.ambiguous ? `<span class="status-pill amber">On ${shipmentsForTrailerKey(r.trailerKey).length} shipments</span>`
+      const status = r.ambiguous ? `<span class="status-pill amber">On ${shipmentsForTrailerKey(r.trailerKey, r.trailerNumber).length} shipments</span>`
         : !r.matched ? `<span class="status-pill amber">No matching trailer #</span>`
         : r.unchanged ? `<span class="status-pill grey">Already set</span>`
         : `<span class="status-pill green">Will update</span>`;
@@ -2266,7 +2287,7 @@ async function applyTrailerLocRows(){
   let updated = 0;
   for(const r of toApply){
     // Re-resolve against the freshly loaded board: the preview may be minutes old.
-    const matches = shipmentsForTrailerKey(r.trailerKey);
+    const matches = shipmentsForTrailerKey(r.trailerKey, r.trailerNumber);
     if(matches.length !== 1) continue;
     const shipment = matches[0];
     if((shipment.confirmedLocation || '') === r.currentZone) continue;

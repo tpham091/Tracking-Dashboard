@@ -488,7 +488,7 @@ tr.row-past td.cell-live,tr.row-soon td.cell-live,tr.row-ready td.cell-live{back
       </div>
       <textarea id="trailerLocPaste" rows="6" style="display:none;"></textarea>
       <div class="submit-row">
-        <span class="hint">Only rows with Workflow State <b>Ready to Depart</b> are used. Each one's Current Zone becomes the Confirmed Trailer Location on the shipment carrying that Trailer #.</span>
+        <span class="hint">This report carries no CS# — shipments are found by matching its <b>Trailer #</b> against the Trailer # already on the board. Only rows with Workflow State <b>Ready to Depart</b> are used, and each one's Current Zone becomes that shipment's Confirmed Trailer Location.</span>
         <button class="btn-primary" onclick="previewTrailerLocImport()">Preview</button>
       </div>
       <div id="trailerLocPreviewWrap" style="display:none;margin-top:16px;">
@@ -2216,7 +2216,7 @@ async function previewTrailerLocImport(){
 
 function renderTrailerLocPreviewTable(){
   const table = document.getElementById('trailerLocPreviewTable');
-  table.innerHTML = `<thead><tr><th>Trailer #</th><th>Current Zone</th><th>Site</th><th>CS#</th><th>Confirmed Location Now</th><th>Status</th><th></th></tr></thead><tbody>` +
+  table.innerHTML = `<thead><tr><th>Trailer #</th><th>Current Zone</th><th>Site</th><th>Matched CS#</th><th>Confirmed Location Now</th><th>Status</th><th></th></tr></thead><tbody>` +
     parsedTrailerLocRows.map((r, i) => {
       const status = r.ambiguous ? `<span class="status-pill amber">On ${shipmentsForTrailerKey(r.trailerKey).length} shipments</span>`
         : !r.matched ? `<span class="status-pill amber">No matching trailer #</span>`

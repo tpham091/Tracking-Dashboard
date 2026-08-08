@@ -297,7 +297,7 @@ th.sortable:hover{color:var(--steel);}
             <option value="206 - SA Perishables">
             <option value="407 - Temple Grocery">
             <option value="203 - SA Combo">
-            <option value="SA - Frozen">
+            <option value="205 - SA Frozen">
           </datalist>
           <div class="field-note" id="d-commodity-note" style="display:none;"></div>
         </div>
@@ -2416,7 +2416,8 @@ async function projectRemainingSchedule(shipment, fromLocation, sinceISO){
   // Arrivals are measured in minutes from the start of the anchor day, so a stop reached
   // after midnight comes through as 1440+ instead of wrapping back to a small number.
   // isNltAtRisk depends on that: 00:30 tomorrow has to read as "later than 23:00 today".
-  const dayStartMs = new Date(clock.getFullYear(), clock.getMonth(), clock.getDate()).getTime();
+  const dayStartMs = dayStartMsFor(clock.toISOString());
+  const departureMin = departureMinutesForShipment(shipment, dayStartMs);
   const legs = [];
   for(const stop of remaining){
     const toCity = cityStateForRouteStop(stop);
@@ -2444,7 +2445,7 @@ async function projectRemainingSchedule(shipment, fromLocation, sinceISO){
       corp: nltInfo.corp, warehouse: nltInfo.warehouse,
       nlt: nltInfo.status === 'ok' ? formatNltDisplay(nltInfo.nlt) : '',
       nltStatus: nltInfo.status,
-      nltRisk: nltInfo.status === 'ok' ? isNltAtRisk(nltInfo.nlt, arrivalMin) : false
+      nltRisk: nltInfo.status === 'ok' ? isNltAtRisk(nltInfo.nlt, arrivalMin, departureMin) : false
     });
     fromKey = toKey;
   }
@@ -2711,19 +2712,55 @@ function nltToMinutes(value){
   return hh * 60 + mm;
 }
 
-const EARLY_MORNING_CUTOFF_MIN = 720; // 12:00 PM — NLTs before this paired with a later ETA are treated as next-day
+const EARLY_MORNING_CUTOFF_MIN = 720; // 12:00 PM — fallback only, see isNltAtRisk
+
+// Start-of-day for an ISO timestamp, in ms. Arrival minutes, departure minutes and NLT
+// deadlines are all expressed relative to this so they can be compared across midnight.
+function dayStartMsFor(iso){
+  const ms = Date.parse(iso || '');
+  const d = new Date(isNaN(ms) ? Date.now() : ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+// When the load actually left, in anchor-day minutes. Goes negative when it departed the
+// day before — a night run still moving the next morning — which is exactly the case the
+// deadline math has to get right.
+function departureMinutesForShipment(shipment, dayStartMs){
+  const mins = timeStringToMinutes(effectiveDepartureTime(shipment));
+  if(mins === null) return null;
+  const parts = String(shipment && shipment.date || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!parts) return null;
+  const departedMs = new Date(parseInt(parts[1],10), parseInt(parts[2],10) - 1, parseInt(parts[3],10)).getTime() + mins * 60000;
+  return Math.round((departedMs - dayStartMs) / 60000);
+}
 // arrivalMin is minutes from the START OF THE ANCHOR DAY (the day the location was
 // reported), NOT minutes past midnight — an arrival at 00:30 the next morning arrives
 // here as 1470, not 30. Both callers must honour that: passing a wrapped time-of-day
 // made a 00:30 arrival compare as "30" against a 23:00 (1380) deadline and silently
 // come back on-time, which is the wrong direction to be wrong on an overnight 227 run.
-// The deadline itself stays in the anchor day's frame: an early-morning NLT paired with
-// an afternoon-or-later arrival belongs to the following morning.
-function isNltAtRisk(nltRaw, arrivalMin){
-  let nltMin = nltToMinutes(nltRaw);
+//
+// Which calendar day the deadline falls on is decided by WHEN THE LOAD DEPARTED, not by
+// what time of day it happens to arrive: the deadline is the first occurrence of the NLT
+// clock time at or after departure. That matches how the two run types actually work —
+// a daytime run leaving in the morning is due 23:00/00:00/01:00 that night, and a night
+// run leaving in the evening is due 04:00/05:00 the next morning — and it gets the case
+// the old rule got wrong: a night run that departed yesterday evening and is still out at
+// 14:00 today has blown its 05:00 deadline, where keying off the arrival's time of day
+// silently rolled that deadline forward to tomorrow morning and reported it on time.
+//
+// departureMin is optional; without it (no departure time or no date on the record) this
+// falls back to the previous heuristic rather than refusing to judge.
+function isNltAtRisk(nltRaw, arrivalMin, departureMin){
+  const nltMin = nltToMinutes(nltRaw);
   if(nltMin === null || arrivalMin === null) return false;
-  if(nltMin < EARLY_MORNING_CUTOFF_MIN && arrivalMin >= EARLY_MORNING_CUTOFF_MIN) nltMin += 24 * 60;
-  return arrivalMin > nltMin;
+  let deadline = nltMin;
+  if(typeof departureMin === 'number' && isFinite(departureMin)){
+    let guard = 0;
+    while(deadline < departureMin && guard++ < 10) deadline += 24 * 60;
+  } else if(nltMin < EARLY_MORNING_CUTOFF_MIN && arrivalMin >= EARLY_MORNING_CUTOFF_MIN){
+    deadline += 24 * 60;
+  }
+  return arrivalMin > deadline;
 }
 
 // Anchor-day arrival minutes for a stored leg. Legs projected before arrivalMin was
@@ -2766,7 +2803,8 @@ function getNltMiss(shipment){
   const info = nltEntryFor(shipment, { companyName: leg.companyName });
   if(info.status !== 'ok') return null;
   const arrivalMin = legArrivalMinutes(leg, last.timestamp);
-  if(arrivalMin === null || !isNltAtRisk(info.nlt, arrivalMin)) return null;
+  const departureMin = departureMinutesForShipment(shipment, dayStartMsFor(last.timestamp));
+  if(arrivalMin === null || !isNltAtRisk(info.nlt, arrivalMin, departureMin)) return null;
   return {
     csNumber: shipment.csNumber,
     warehouse: info.warehouse,
@@ -2798,11 +2836,12 @@ function computeNltRiskAlerts(){
     const last = updates.length ? updates[updates.length - 1] : null;
     if(!last || !last.location || isLocationStale(last)) return;
     const legs = s.projectedSchedule || [];
+    const departureMin = departureMinutesForShipment(s, dayStartMsFor(last.timestamp));
     for(let i = 1; i < legs.length; i++){
       const info = nltEntryFor(s, { companyName: legs[i].companyName });
       if(info.status !== 'ok') continue;
       const arrivalMin = legArrivalMinutes(legs[i], last.timestamp);
-      if(arrivalMin === null || !isNltAtRisk(info.nlt, arrivalMin)) continue;
+      if(arrivalMin === null || !isNltAtRisk(info.nlt, arrivalMin, departureMin)) continue;
       risks.push({
         csNumber: s.csNumber, companyName: legs[i].companyName,
         arrival: legs[i].arrival, nlt: formatNltDisplay(info.nlt), stopsAhead: i + 1

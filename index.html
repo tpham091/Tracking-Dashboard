@@ -1892,10 +1892,13 @@ function todayDatePart(){
 
 function updateRouteStopTime(cs, index, field, timeValue){
   if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
-  if(!timeValue) return;
   const s = shipments[cs];
   const stop = s && s.routeStops && s.routeStops[index];
   if(!stop) return;
+  if(!timeValue){
+    updateRouteStopField(cs, index, field, '');
+    return;
+  }
   const existingDate = datePartOf(stop[field]) || datePartOf(stop.earliestDate) || datePartOf(s.scheduleRelease) || todayDatePart();
   updateRouteStopField(cs, index, field, formatCarrierDateTime(existingDate + ' ' + timeValue));
 }
@@ -3214,9 +3217,9 @@ function renderRouteStopsDetails(routeStops, shipment){
           <td>${escapeHtml(storeAddressLineForStop(st))||'—'}</td>
           <td>${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
           <td class="mono">${escapeHtml(nltForRouteStop(shipment, st))||'—'}</td>
-          <td><input type="time" class="inline-edit" id="stopcell-${domCs}-${i}-arrivalDate" value="${escapeAttr(carrierTimeFromDateTime(st.arrivalDate))}" onchange="updateRouteStopTime('${escapeAttr(cs)}', ${i}, 'arrivalDate', this.value)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'arrivalDate')"></td>
+          <td><input type="time" class="inline-edit" id="stopcell-${domCs}-${i}-arrivalDate" value="${escapeAttr(carrierTimeFromDateTime(st.arrivalDate))}" onchange="updateRouteStopTime('${escapeAttr(cs)}', ${i}, 'arrivalDate', this.value)" onblur="updateRouteStopTime('${escapeAttr(cs)}', ${i}, 'arrivalDate', this.value)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'arrivalDate')"></td>
           <td><input type="checkbox" id="stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateRouteStopField('${escapeAttr(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'arrived')"></td>
-          <td><input type="time" class="inline-edit" id="stopcell-${domCs}-${i}-departureDate" value="${escapeAttr(carrierTimeFromDateTime(st.departureDate))}" onchange="updateRouteStopTime('${escapeAttr(cs)}', ${i}, 'departureDate', this.value)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'departureDate')"></td>
+          <td><input type="time" class="inline-edit" id="stopcell-${domCs}-${i}-departureDate" value="${escapeAttr(carrierTimeFromDateTime(st.departureDate))}" onchange="updateRouteStopTime('${escapeAttr(cs)}', ${i}, 'departureDate', this.value)" onblur="updateRouteStopTime('${escapeAttr(cs)}', ${i}, 'departureDate', this.value)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'departureDate')"></td>
           <td><input type="checkbox" id="stopcell-${domCs}-${i}-completed" ${st.completed ? 'checked' : ''} onchange="updateRouteStopField('${escapeAttr(cs)}', ${i}, 'completed', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'completed')"></td>
         </tr>`).join('')}
       </tbody>

@@ -127,6 +127,26 @@ Every one of these keeps its current behavior and its current DOM contract:
 - Every element ID, every `datalist`, the expander/history ID scheme, `sanitizeKey` output.
 - Uppercase-as-you-type on text inputs, focus/caret restoration across re-render.
 
+## As built — where the implementation differs from the plan above
+
+- **No sticky Live Position columns.** The plan called for pinning Last Location and ETA
+  with `position: sticky`. Once implemented it became clear there is nothing to pin
+  against: the log table is `table-layout: fixed` at 100% width inside
+  `#logContent { overflow-x: hidden }`, so it never scrolls horizontally. The columns get
+  the tinted band, the rules, the extra width and the larger type; sticky would have been
+  inert CSS. The table header is sticky vertically, which does do something.
+- **Status pills wrap instead of ellipsing.** Not in the plan, but "Trailer Pending (Due)"
+  clipped to `TRAIL…` tells a dispatcher nothing. Two short lines fit the column.
+- **The native time-picker button is hidden in the log table only.** It costs ~20px in a
+  5.5% column and these times get typed, not picked. Entry forms keep theirs.
+- **Column headers abbreviated** where the full word cost a column: "Commodity/Shipper" →
+  "Commodity", "Confirmed Loc." → "Confirmed", "Empty Trailer" → "Empty Trlr".
+  Truncated cells (Consignee, Driver, Commodity) gained `title` tooltips.
+- **NLT panel moved above the Close Out card** in the Tracking Log, so it is the first
+  thing on the view rather than the second.
+- **Empty NLT state**: implemented as planned — the card stays visible and turns green
+  with "No NLT exposure — N loads in transit checked" rather than hiding.
+
 ## Sequence
 
 1. Token block + typography + spacing primitives (`:root`, base elements). Visually neutral pass.

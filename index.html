@@ -43,6 +43,14 @@
   --role:var(--role-dcm);
   --role-tint:#E8ECF3;
 
+  /* Chart fills. The status pills keep --green/--red; chart marks need a pair that
+     survives colorblind vision as filled areas, so on-time and late are separated on
+     lightness as well as hue. Validated: worst adjacent deutan dE 19.1, normal dE 30.0,
+     both above 3:1 against the panel surface. */
+  --chart-ok:#3E9E6E;
+  --chart-late:#8A2A22;
+  --chart-missing:#8494A4;
+
   /* The Last Location / ETA band. */
   --live-bg:#EDF3F9;
   --live-line:#C3D5E7;
@@ -236,7 +244,20 @@ input[type="text"],.f-field select{text-transform:uppercase;}
 .nlt-detail{color:var(--red);font-weight:700;margin-left:auto;font-variant-numeric:tabular-nums;}
 .nlt-item-unverified{color:var(--ink-soft);}
 .nlt-detail-muted{color:var(--ink-soft);font-weight:600;}
-.nlt-empty{font-size:13px;color:var(--green);font-weight:600;}
+.nlt-empty{font-size:13px;color:var(--green);font-weight:600;padding:2px 0 var(--s2);}
+
+/* The alert list is capped so the panel can never push the Tracking Log below the fold —
+   it is a summary that sits above the board, not a second board. */
+#nltAlerts{max-height:210px;overflow-y:auto;}
+.nlt-unverified-toggle{
+  display:flex;align-items:center;gap:var(--s2);width:100%;
+  background:none;border:none;border-top:1px solid rgba(176,50,42,0.16);
+  padding:7px 0;margin:0;font:inherit;font-size:12.5px;color:var(--ink-soft);
+  text-align:left;cursor:pointer;
+}
+.nlt-unverified-toggle:hover{color:var(--ink);}
+.nlt-unverified-toggle b{color:var(--ink);font-variant-numeric:tabular-nums;}
+.nlt-chevron{font-family:var(--f-mono);font-weight:700;margin-left:var(--s2);}
 
 .nlt-card.nlt-clear{
   border-color:var(--green-line);border-left-color:var(--green);
@@ -456,9 +477,38 @@ tr.row-past td.cell-live,tr.row-soon td.cell-live,tr.row-ready td.cell-live{back
 .commodity-kpi-name{font-weight:800;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .commodity-kpi-pct{font-family:var(--f-mono);font-size:14px;font-weight:700;}
 .kpi-bar{height:7px;background:var(--n-100);border-radius:var(--r-pill);overflow:hidden;margin:var(--s2) 0;}
-.kpi-bar > span{display:block;height:100%;background:#31D17F;border-radius:var(--r-pill);}
+.kpi-bar > span{display:block;height:100%;background:var(--chart-ok);border-radius:var(--r-pill);}
 .commodity-kpi-meta{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s2);font-size:10.5px;color:var(--ink-soft);}
 .commodity-kpi-meta b{display:block;color:var(--ink);font-size:12px;}
+
+/* Delivery Trend chart. The SVG scales with the panel; type inside it scales with the
+   viewBox, so sizes are in viewBox units rather than px. */
+.trend-chart{display:block;width:100%;height:auto;margin-top:var(--s2);overflow:visible;}
+.trend-base{stroke:var(--n-200);stroke-width:1;}
+.trend-ontime{fill:var(--chart-ok);}
+/* Late carries a hatch as its secondary encoding, so its fill comes from the pattern on
+   the element itself — a CSS fill here would override the presentation attribute. */
+.trend-late{}
+.trend-missing{fill:var(--chart-missing);}
+.trend-hit{fill:transparent;}
+.trend-col:hover .trend-hit{fill:var(--n-50);}
+.trend-value{fill:var(--ink);font-family:var(--f-mono);font-size:15px;font-weight:600;text-anchor:middle;font-variant-numeric:tabular-nums;}
+.trend-axis{fill:var(--n-600);font-family:var(--f-ui);font-size:14px;text-anchor:middle;font-variant-numeric:tabular-nums;}
+.chart-legend{display:flex;align-items:center;gap:var(--s3);font-size:11px;color:var(--ink-soft);white-space:nowrap;}
+.chart-legend span{display:inline-flex;align-items:center;gap:6px;}
+.chart-legend .swatch{width:11px;height:11px;border-radius:3px;display:inline-block;}
+.chart-legend .swatch-ontime{background:var(--chart-ok);}
+.chart-legend .swatch-late{background:var(--chart-late);
+  background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 2px,transparent 2px 4px);}
+.chart-legend .swatch-missing{background:var(--chart-missing);}
+.trend-hatch-line{stroke:var(--n-0);opacity:0.5;}
+
+/* Magnitude inside a table cell: the miss count is easier to rank down a column as a
+   bar than as a row of numerals. The number stays — the bar is the secondary read. */
+.bar-cell{display:flex;align-items:center;gap:var(--s2);}
+.bar-cell .bar-track{flex:1;min-width:44px;height:7px;background:var(--n-100);border-radius:var(--r-pill);overflow:hidden;}
+.bar-cell .bar-fill{display:block;height:100%;background:var(--chart-late);border-radius:var(--r-pill);}
+.bar-cell .bar-num{font-family:var(--f-mono);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;min-width:20px;text-align:right;}
 .kpi-actions{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;justify-content:flex-end;}
 .kpi-actions input[type="date"]{max-width:170px;}
 @media (max-width:1200px){
@@ -622,6 +672,23 @@ th.sortable:hover{background:#151918;color:#FFFFFF;}
 .kpi-card .num,.commodity-kpi-pct{color:#FFFFFF;font-family:var(--f-ui);font-weight:700;}
 .kpi-card .lbl,.kpi-card .sub,.commodity-kpi-meta{color:#8E999A;}
 .kpi-bar{background:#242B2A;}
+/* Chart marks on the dark skin. Dark mode gets its own steps rather than an automatic
+   flip: these are the status colors the pills and stat tiles already use, so a green bar
+   and a green pill mean the same thing. Against the #151918 panel that pair sits at
+   deutan dE 7.5 — inside the floor band, which is only legal with a second encoding, so
+   the late segment is hatched and every column carries a direct label and a legend. */
+:root{--chart-ok:#31D17F;--chart-late:#FF4E5F;--chart-missing:#8E999A;}
+.trend-base{stroke:rgba(255,255,255,0.14);}
+.trend-value{fill:#FFFFFF;}
+.trend-axis{fill:#8E999A;}
+.trend-col:hover .trend-hit{fill:rgba(255,255,255,0.05);}
+.chart-legend{color:#8E999A;}
+.bar-cell .bar-track{background:#242B2A;}
+.bar-cell .bar-num{color:#F4F7F7;}
+.trend-hatch-line{stroke:#151918;opacity:0.75;}
+.nlt-unverified-toggle{border-top-color:rgba(255,255,255,0.08);color:#8E999A;}
+.nlt-unverified-toggle:hover{color:#F4F7F7;}
+.nlt-unverified-toggle b{color:#FFFFFF;}
 .stat.green{box-shadow:inset 3px 0 0 #31D17F;}
 .stat.amber{box-shadow:inset 3px 0 0 #F8BB2B;}
 .stat.red{box-shadow:inset 3px 0 0 #FF4E5F;}
@@ -1128,7 +1195,7 @@ th.sortable:hover{background:#151918;color:#FFFFFF;}
     </div>
     <div class="stats-row" id="statsRow"></div>
     <div class="filter-bar">
-      <input type="text" id="searchInput" placeholder="Search CS#, commodity, consignee, driver..." oninput="renderLog()">
+      <input type="text" id="searchInput" placeholder="Search CS#, commodity, consignee, driver..." oninput="queueLogRender()">
       <select id="statusFilter" onchange="renderLog()">
         <option value="">All Statuses</option>
         <option value="pending_pickup">Pending Pickup</option>
@@ -1250,6 +1317,22 @@ function stopLogFromDb(obj){
 // sneak in (e.g. a copy-pasted CS# or trailer ID) so the key is always valid.
 function sanitizeKey(k){
   return String(k).replace(/[.#$\[\]\/]/g, '_');
+}
+
+// sanitizeKey strips the characters Firebase rejects in a path — it was never an HTML
+// safety net, and its output was being interpolated straight into id="...". A CS# carrying
+// a double quote then closed the attribute and everything after it was parsed as more
+// attributes. Element ids go through this instead: alphanumerics, underscore and hyphen only.
+function domKey(value){
+  const raw = String(value === null || value === undefined ? '' : value);
+  const safe = raw.replace(/[^A-Za-z0-9_-]/g, '_');
+  if(safe === raw) return safe;
+  // Two different identifiers can flatten to the same token ("CS 1" and "CS.1" both give
+  // "CS_1"), which would cross-wire their inputs and their expander. A short hash of the
+  // original keeps ids distinct without letting the original characters into the markup.
+  let h = 0;
+  for(let i = 0; i < raw.length; i++) h = (h * 31 + raw.charCodeAt(i)) | 0;
+  return safe + '-' + (h >>> 0).toString(36);
 }
 
 function showConnectionBanner(){
@@ -2176,7 +2259,7 @@ async function renderEmptyList(){
     rows.map(r => `<tr>
       <td class="mono">${r.trailerInfo}</td><td>${r.currentZone||'—'}</td><td>${r.site||'—'}</td>
       <td>${r.carrier||'—'}</td><td>${r.trailerProfile||'—'}</td>
-      <td><button class="del-btn" onclick="confirmClick(this, () => deleteEmptyTrailer('${r.trailerInfo}'))" title="Remove">&times;</button></td>
+      <td><button class="del-btn" onclick="confirmClick(this, () => deleteEmptyTrailer('${jsArg(r.trailerInfo)}'))" title="Remove">&times;</button></td>
     </tr>`).join('') + `</tbody></table>`;
 }
 
@@ -2241,8 +2324,28 @@ function rebuildEmptyDropdownOptions(){
   if(trailers.some(t => t.trailerInfo === current)) sel.value = current;
 }
 
+// Trailer ID -> the CS#s currently holding it. Built once per Tracking Log render and
+// dropped afterwards: without it every row re-scanned every shipment for every trailer in
+// the dispatch list, which is rows x trailers x shipments of work on a 30-second timer.
+// Outside a render the index is null and the direct scan runs, so the write paths in
+// handleLogEmptyTrailerChange still see freshly loaded state.
+let assignedTrailerOwners = null;
+function buildAssignedTrailerOwners(){
+  const owners = new Map();
+  Object.values(shipments).forEach(s => {
+    if(!s.emptyTrailer) return;
+    if(!owners.has(s.emptyTrailer)) owners.set(s.emptyTrailer, new Set());
+    owners.get(s.emptyTrailer).add(s.csNumber);
+  });
+  return owners;
+}
 function isEmptyTrailerAssigned(id, exceptCs){
   if(!id) return false;
+  if(assignedTrailerOwners){
+    const owners = assignedTrailerOwners.get(id);
+    if(!owners) return false;
+    return owners.size > 1 || !owners.has(exceptCs);
+  }
   return Object.values(shipments).some(s => s.csNumber !== exceptCs && s.emptyTrailer === id);
 }
 
@@ -2261,11 +2364,11 @@ function renderLogEmptyTrailerCell(shipment){
   }
   const options = availableEmptyTrailerOptionsFor(shipment);
   if(options.length === 0 && !shipment.emptyTrailer){
-    return `<select class="inline-edit" onchange="handleLogEmptyTrailerChange('${escapeAttr(shipment.csNumber)}', this.value)">
+    return `<select class="inline-edit" onchange="handleLogEmptyTrailerChange('${jsArg(shipment.csNumber)}', this.value)">
       <option value="">None</option>
     </select>`;
   }
-  return `<select class="inline-edit" onchange="handleLogEmptyTrailerChange('${escapeAttr(shipment.csNumber)}', this.value)">
+  return `<select class="inline-edit" onchange="handleLogEmptyTrailerChange('${jsArg(shipment.csNumber)}', this.value)">
     <option value="">None</option>
     ${options.map(t => {
       const id = t.trailerInfo || '';
@@ -3017,23 +3120,45 @@ function minutesBetweenStopEvents(routeStops, previousEventIndex, currentEventIn
   return drive && drive.minutes ? drive.minutes : ETA_DEFAULT_MIN;
 }
 
+// Ticking Arrived or Completed on stop N implies every earlier stop already happened, so
+// this walks backwards from that event filling in the ones nobody recorded. Two rules keep
+// the invented times honest:
+//   * the anchor comes from a time on the clicked stop itself before it comes from "now" —
+//     a close-out import writes departureDate and then ticks Arrived, and anchoring that on
+//     import time stamped an arrival hours after the stop's own departure;
+//   * back-filled times are clamped forward against any time already on the record, so the
+//     synthetic drive/dwell estimates can never place an arrival before a departure a
+//     dispatcher actually typed.
 function cascadeRouteStopEvents(routeStops, targetIndex, field, anchorDate){
   if(!routeStops || !routeStops[targetIndex]) return false;
   const targetEvent = routeStopEventIndex(targetIndex, field);
   let cursor = anchorDate && !isNaN(anchorDate.getTime()) ? new Date(anchorDate) : null;
   if(!cursor){
     const target = routeStops[targetIndex];
-    cursor = parseCarrierDateTime(target[field === 'completed' ? 'departureDate' : 'arrivalDate']) || new Date();
+    const arrival = parseCarrierDateTime(target.arrivalDate);
+    const departure = parseCarrierDateTime(target.departureDate);
+    cursor = (field === 'completed'
+      ? departure || (arrival ? new Date(arrival.getTime() + DWELL_MIN * 60000) : null)
+      : arrival || (departure ? new Date(departure.getTime() - DWELL_MIN * 60000) : null))
+      || new Date();
   }
+
   let changed = false;
+  const planned = new Map(); // event index -> the time we intend to back-fill it with
   for(let eventIndex = targetEvent; eventIndex >= 0; eventIndex--){
     const event = routeStopEventInfo(eventIndex);
     const stop = routeStops[event.stopIndex];
     if(!stop) continue;
-    if(!stop[event.dateField]){
-      stop[event.dateField] = formatDateTimeAsCarrierString(cursor);
-      changed = true;
+    const raw = stop[event.dateField];
+    const existing = parseCarrierDateTime(raw);
+    if(existing){
+      cursor = existing; // re-anchor onto a recorded time instead of estimating past it
+    } else if(!raw){
+      planned.set(eventIndex, cursor);
     }
+    // A value that is present but unparseable (formatCarrierDateTime keeps unrecognized
+    // cells verbatim) is left exactly as the carrier sent it: we can't anchor to it, and
+    // overwriting it would replace a real timestamp with an estimate.
     if(!stop[event.checkField]){
       stop[event.checkField] = true;
       changed = true;
@@ -3042,17 +3167,35 @@ function cascadeRouteStopEvents(routeStops, targetIndex, field, anchorDate){
       stop.arrived = true;
       changed = true;
     }
-    if(event.dateField === 'departureDate' && !stop.arrivalDate){
-      stop.arrivalDate = formatDateTimeAsCarrierString(new Date(cursor.getTime() - DWELL_MIN * 60000));
-      stop.arrived = true;
-      changed = true;
-    }
     if(eventIndex > 0){
       cursor = new Date(cursor.getTime() - minutesBetweenStopEvents(routeStops, eventIndex - 1, eventIndex) * 60000);
     }
   }
+
+  let floor = null;
+  for(let eventIndex = 0; eventIndex <= targetEvent; eventIndex++){
+    const event = routeStopEventInfo(eventIndex);
+    const stop = routeStops[event.stopIndex];
+    if(!stop) continue;
+    if(planned.has(eventIndex)){
+      const candidate = planned.get(eventIndex);
+      const when = (floor && candidate.getTime() < floor.getTime()) ? floor : candidate;
+      stop[event.dateField] = formatDateTimeAsCarrierString(when);
+      changed = true;
+      floor = when;
+    } else {
+      const existing = parseCarrierDateTime(stop[event.dateField]);
+      if(existing) floor = existing;
+    }
+  }
   return changed;
 }
+
+// A time-only gate out ("01:15") is placed on the release date. Without a rollover that
+// stamps a post-midnight gate out nearly a full day *before* a 22:00 release, which then
+// back-dates the whole route. Anything landing more than half a day early is read as the
+// next calendar day instead; a modest early gate out is left alone.
+const GATE_OUT_ROLLOVER_TOLERANCE_MIN = 12 * 60;
 
 function gateOutDateTimeForShipment(shipment, gateOutValue){
   const parsed = parseShipmentDateTime(gateOutValue);
@@ -3063,22 +3206,33 @@ function gateOutDateTimeForShipment(shipment, gateOutValue){
   const d = new Date(anchor);
   const parts = time.split(':').map(Number);
   d.setHours(parts[0], parts[1], 0, 0);
+  if(anchor.getTime() - d.getTime() > GATE_OUT_ROLLOVER_TOLERANCE_MIN * 60000){
+    d.setDate(d.getDate() + 1);
+  }
   return d;
 }
 
+// Gate out is the truck leaving the shipping facility, so it stamps the first stop as
+// departed. It refuses to touch a route whose first stop is a store: deriveShipperDepartureStop
+// already contemplates those, and marking one arrived+completed reports a delivery that
+// never happened. The arrival side is derived from the departure rather than set equal to
+// it, so the shipper doesn't record an impossible zero dwell.
 function applyGateOutToFirstRouteStop(shipment, gateOutValue){
   if(!shipment || !shipment.routeStops || !shipment.routeStops.length || !gateOutValue) return false;
+  const first = shipment.routeStops[0];
+  if(isStoreRouteStop(first) && !isShipperLikeRouteStop(first)) return false;
   const stampDate = gateOutDateTimeForShipment(shipment, gateOutValue);
   if(!stampDate) return false;
-  const stamp = formatDateTimeAsCarrierString(stampDate);
-  const first = shipment.routeStops[0];
   let changed = false;
-  ['arrivalDate','departureDate'].forEach(field => {
-    if(!first[field]){
-      first[field] = stamp;
-      changed = true;
-    }
-  });
+  if(!first.departureDate){
+    first.departureDate = formatDateTimeAsCarrierString(stampDate);
+    changed = true;
+  }
+  if(!first.arrivalDate){
+    const departure = parseCarrierDateTime(first.departureDate) || stampDate;
+    first.arrivalDate = formatDateTimeAsCarrierString(new Date(departure.getTime() - DWELL_MIN * 60000));
+    changed = true;
+  }
   if(!first.arrived){ first.arrived = true; changed = true; }
   if(!first.completed){ first.completed = true; changed = true; }
   return changed;
@@ -4965,12 +5119,18 @@ let suppressInlineCommit = false;
 
 const openHistoryIds = new Set();
 function toggleHistory(cs){
-  const row = document.getElementById('hist-'+cs);
+  const row = document.getElementById('hist-' + domKey(cs));
   if(!row) return;
   const opening = row.style.display === 'none';
+  // Rows render their detail panel the first time they are opened, then keep it —
+  // reopening is instant and a re-render rebuilds only the panels still open.
+  if(opening){
+    const body = document.getElementById('histbody-' + domKey(cs));
+    if(body && !body.innerHTML.trim()) body.innerHTML = shipmentDetailHtml(shipments[cs]);
+  }
   row.style.display = opening ? 'table-row' : 'none';
   if(opening) openHistoryIds.add(cs); else openHistoryIds.delete(cs);
-  const btn = document.getElementById('expander-' + sanitizeKey(cs));
+  const btn = document.getElementById('expander-' + domKey(cs));
   if(btn) btn.innerHTML = opening ? '&minus;' : '+';
 }
 
@@ -5034,6 +5194,15 @@ function trackingLogFieldValue(shipment, field){
   return shipment && shipment[field] || '';
 }
 
+// Report-derived text going into an inline handler has to survive two layers: the JS
+// single-quoted string literal, then the HTML attribute around it. A CS#, trailer or
+// load number carrying an apostrophe used to break every control on its row.
+function jsArg(value){
+  return escapeAttr(String(value === null || value === undefined ? '' : value)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'"));
+}
+
 function escapeAttr(s){
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -5086,19 +5255,25 @@ function handleDocumentClickForFilters(e){
   }
 }
 
+// Only the open panel is built. A closed panel used to render its full option list
+// anyway — five columns' worth of every distinct value on the board, rebuilt on every
+// keystroke and every 30-second poll, all of it display:none.
 function filterDropdownHtml(field, label){
-  const values = distinctValues(field);
   const selected = logColumnFilters[field];
   const isOpen = openFilterDropdown === field;
-  const search = (dropdownSearch[field]||'').toLowerCase();
-  const visibleValues = search ? values.filter(v => String(v).toLowerCase().includes(search)) : values;
   const count = selected.length;
-  return `<div class="cf-dropdown${isOpen?' open':''}">
-    <button type="button" class="cf-trigger${count?' active':''}" onclick="toggleFilterDropdown('${field}')">
+  const trigger = `<button type="button" class="cf-trigger${count?' active':''}" onclick="toggleFilterDropdown('${field}')">
       ${label}${count ? `<span class="cf-badge">${count}</span>` : ''}
       <span class="cf-arrow">${isOpen?'&#9652;':'&#9662;'}</span>
-    </button>
-    <div class="cf-panel" style="display:${isOpen?'block':'none'};">
+    </button>`;
+  if(!isOpen) return `<div class="cf-dropdown">${trigger}</div>`;
+
+  const values = distinctValues(field);
+  const search = (dropdownSearch[field]||'').toLowerCase();
+  const visibleValues = search ? values.filter(v => String(v).toLowerCase().includes(search)) : values;
+  return `<div class="cf-dropdown open">
+    ${trigger}
+    <div class="cf-panel" style="display:block;">
       ${values.length > 6 ? `<input type="text" id="cfsearch-${field}" class="cf-search" placeholder="Search ${label}..." value="${escapeAttr(dropdownSearch[field]||'')}" oninput="setDropdownSearch('${field}', this.value)">` : ''}
       <div class="cf-actions">
         <button type="button" class="cf-link" onclick="clearFilterValues('${field}')">Clear</button>
@@ -5107,7 +5282,7 @@ function filterDropdownHtml(field, label){
       <div class="cf-options">
         ${values.length === 0 ? `<div class="cf-empty">No values yet</div>` :
           visibleValues.length === 0 ? `<div class="cf-empty">No matches</div>` :
-          visibleValues.map(v => `<label class="cf-option"><input type="checkbox" data-field="${field}" data-value="${escapeAttr(v)}" onchange="toggleFilterValue(this)" ${selected.includes(v)?'checked':''}><span>${v}</span></label>`).join('')}
+          visibleValues.map(v => `<label class="cf-option"><input type="checkbox" data-field="${field}" data-value="${escapeAttr(v)}" onchange="toggleFilterValue(this)" ${selected.includes(v)?'checked':''}><span>${escapeHtml(v)}</span></label>`).join('')}
       </div>
     </div>
   </div>`;
@@ -5692,8 +5867,8 @@ function renderRouteStopDateTimeInput(cs, domCs, index, field, value, isHistory)
   const dateId = `${datePrefix}-${index}-${field}`;
   const updateFn = isHistory ? 'updateHistoryRouteStopDateTime' : 'updateRouteStopDateTime';
   return `<div class="stop-datetime">
-    <input type="date" class="inline-edit stop-date" id="${dateId}" value="${escapeAttr(carrierDateInputFromDateTime(value))}" onchange="${updateFn}('${escapeAttr(cs)}', ${index}, '${field}', this.value, document.getElementById('${timeId}').value)">
-    <input type="text" inputmode="numeric" maxlength="5" class="inline-edit time-mask" id="${timeId}" value="${escapeAttr(carrierTimeFromDateTime(value))}" placeholder="HH:MM" onfocus="prepareTimeMask(this)" oninput="handleTimeMaskInput(this)" onchange="finishTimeMask(this);${updateFn}('${escapeAttr(cs)}', ${index}, '${field}', document.getElementById('${dateId}').value, this.value)" onblur="finishTimeMask(this);${updateFn}('${escapeAttr(cs)}', ${index}, '${field}', document.getElementById('${dateId}').value, this.value)" onkeydown="handleTimeMaskKeydown(event);handleStopGridNav(event,'${navKey}',${index},'${field}')">
+    <input type="date" class="inline-edit stop-date" id="${dateId}" value="${escapeAttr(carrierDateInputFromDateTime(value))}" onchange="${updateFn}('${jsArg(cs)}', ${index}, '${field}', this.value, document.getElementById('${timeId}').value)">
+    <input type="text" inputmode="numeric" maxlength="5" class="inline-edit time-mask" id="${timeId}" value="${escapeAttr(carrierTimeFromDateTime(value))}" placeholder="HH:MM" onfocus="prepareTimeMask(this)" oninput="handleTimeMaskInput(this)" onchange="finishTimeMask(this);${updateFn}('${jsArg(cs)}', ${index}, '${field}', document.getElementById('${dateId}').value, this.value)" onblur="finishTimeMask(this);${updateFn}('${jsArg(cs)}', ${index}, '${field}', document.getElementById('${dateId}').value, this.value)" onkeydown="handleTimeMaskKeydown(event);handleStopGridNav(event,'${navKey}',${index},'${field}')">
   </div>`;
 }
 
@@ -5701,7 +5876,7 @@ function renderRouteStopsDetails(routeStops, shipment){
   routeStops = dedupeRouteStops(routeStops || []);
   if(!routeStops || routeStops.length === 0) return '';
   const cs = shipment && shipment.csNumber || '';
-  const domCs = sanitizeKey(cs);
+  const domCs = domKey(cs);
   return `<div class="hist-item"><b>Carrier stop details</b></div>
     <table class="route-stop-table">
       <thead><tr>
@@ -5714,9 +5889,9 @@ function renderRouteStopsDetails(routeStops, shipment){
           <td>${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
           <td class="mono">${escapeHtml(nltForRouteStop(shipment, st))||'—'}</td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'arrivalDate', st.arrivalDate, false)}</td>
-          <td><input type="checkbox" id="stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateRouteStopField('${escapeAttr(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'arrived')"></td>
+          <td><input type="checkbox" id="stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateRouteStopField('${jsArg(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'arrived')"></td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'departureDate', st.departureDate, false)}</td>
-          <td><input type="checkbox" id="stopcell-${domCs}-${i}-completed" ${st.completed ? 'checked' : ''} onchange="updateRouteStopField('${escapeAttr(cs)}', ${i}, 'completed', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'completed')"></td>
+          <td><input type="checkbox" id="stopcell-${domCs}-${i}-completed" ${st.completed ? 'checked' : ''} onchange="updateRouteStopField('${jsArg(cs)}', ${i}, 'completed', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'completed')"></td>
         </tr>`).join('')}
       </tbody>
     </table>`;
@@ -5744,7 +5919,7 @@ function renderProjectedSchedule(legs){
 function renderLateDepartureReason(shipment){
   if(!isLateDeparture(shipment)) return '';
   const cs = shipment && shipment.csNumber || '';
-  const domCs = sanitizeKey(cs);
+  const domCs = domKey(cs);
   const departed = effectiveDepartureTime(shipment) || '—';
   const release = releaseDisplayForShipment(shipment) || shipment.scheduleRelease || '—';
   const lateBy = lateDepartureLabel(shipment);
@@ -5752,7 +5927,7 @@ function renderLateDepartureReason(shipment){
     <b>Late Departure</b> — ${escapeHtml(lateBy)}. Departed ${escapeHtml(departed)} after Pick Up Start ${escapeHtml(release)}
     <div class="late-reason-edit">
       <input type="text" id="late-reason-${domCs}" class="inline-edit" value="${escapeAttr(shipment.lateDepartureReason || '')}" placeholder="Enter late departure reason">
-      <button class="btn-primary" onclick="updateLateDepartureReason('${escapeAttr(cs)}', document.getElementById('late-reason-${domCs}').value)">Save Reason</button>
+      <button class="btn-primary" onclick="updateLateDepartureReason('${jsArg(cs)}', document.getElementById('late-reason-${domCs}').value)">Save Reason</button>
     </div>
   </div>`;
 }
@@ -6126,6 +6301,19 @@ function computeNltUnverified(){
   return out.sort((a,b) => a.csNumber.localeCompare(b.csNumber, undefined, {numeric:true}));
 }
 
+// Three tiers, and they are not equal. NLT Miss and At Risk are the alerts — they get the
+// headline count and are always listed in full. Unverified is a data-quality signal ("we
+// could not check this one"), and there is normally a lot of it: listing every unverified
+// load unbounded pushed the entire Tracking Log below the fold, which is the opposite of
+// what a panel at the top of the board is for. It now collapses to a single line the
+// dispatcher can open, and the whole body is height-capped so the table always stays in view.
+let nltUnverifiedExpanded = false;
+
+function toggleNltUnverified(){
+  nltUnverifiedExpanded = !nltUnverifiedExpanded;
+  renderNltAlerts();
+}
+
 function renderNltAlerts(){
   const card = document.getElementById('nltAlertCard');
   const body = document.getElementById('nltAlerts');
@@ -6134,20 +6322,20 @@ function renderNltAlerts(){
   const risks = computeNltRiskAlerts();
   const unverified = computeNltUnverified();
   const inTransit = Object.values(shipments).filter(s => getStatus(s) === 'in_transit').length;
+  const actionable = alerts.length + risks.length;
 
   // The card stays up even when everything is clear. Hiding it made "no NLT exposure"
   // and "this panel stopped working" look exactly the same on a board people trust.
   card.style.display = 'block';
-  card.classList.toggle('nlt-clear', alerts.length === 0 && risks.length === 0 && unverified.length === 0);
-  count.textContent = String(alerts.length + risks.length + unverified.length);
+  card.classList.toggle('nlt-clear', actionable === 0 && unverified.length === 0);
+  count.textContent = actionable ? String(actionable) : '';
 
-  if(alerts.length === 0 && risks.length === 0 && unverified.length === 0){
-    count.textContent = '';
+  if(actionable === 0 && unverified.length === 0){
     body.innerHTML = `<div class="nlt-empty">No NLT exposure — ${inTransit} load${inTransit === 1 ? '' : 's'} in transit checked.</div>`;
     return;
   }
 
-  body.innerHTML = alerts.map(a => `
+  const missItems = alerts.map(a => `
     <div class="nlt-item">
       <span class="status-pill red">NLT Miss</span>
       <span class="mono">${escapeHtml(a.csNumber)}</span>
@@ -6156,7 +6344,9 @@ function renderNltAlerts(){
       <span>${escapeHtml(a.location)}</span>
       <span class="nlt-detail">ETA ${escapeHtml(a.eta)} past NLT ${escapeHtml(a.nlt)}</span>
     </div>
-  `).join('') + risks.map(r => `
+  `).join('');
+
+  const riskItems = risks.map(r => `
     <div class="nlt-item">
       <span class="status-pill amber">NLT At Risk</span>
       <span class="mono">${escapeHtml(r.csNumber)}</span>
@@ -6164,13 +6354,35 @@ function renderNltAlerts(){
       <span>${r.stopsAhead} stops ahead</span>
       <span class="nlt-detail">Projected arrival ${escapeHtml(r.arrival)} vs NLT ${escapeHtml(r.nlt)}</span>
     </div>
-  `).join('') + unverified.map(u => `
-    <div class="nlt-item nlt-item-unverified">
-      <span class="status-pill grey">Unverified</span>
-      <span class="mono">${escapeHtml(u.csNumber)}</span>
-      <span class="nlt-detail nlt-detail-muted">${escapeHtml(u.reason)}</span>
-    </div>
   `).join('');
+
+  const clearLine = actionable === 0
+    ? `<div class="nlt-empty">No NLT miss or at-risk exposure — ${inTransit} load${inTransit === 1 ? '' : 's'} in transit checked.</div>`
+    : '';
+
+  let unverifiedBlock = '';
+  if(unverified.length){
+    // The reasons repeat across loads, so the collapsed line names the commonest one —
+    // that is usually the thing to go fix, rather than any individual CS#.
+    const byReason = {};
+    unverified.forEach(u => { byReason[u.reason] = (byReason[u.reason] || 0) + 1; });
+    const topReason = Object.keys(byReason).sort((a,b) => byReason[b] - byReason[a])[0] || '';
+    unverifiedBlock = `<button type="button" class="nlt-unverified-toggle" onclick="toggleNltUnverified()"
+        aria-expanded="${nltUnverifiedExpanded}">
+        <span class="status-pill grey">Unverified</span>
+        <span><b>${unverified.length}</b> load${unverified.length === 1 ? '' : 's'} could not be checked</span>
+        <span class="nlt-detail nlt-detail-muted">${escapeHtml(topReason)}${byReason[topReason] < unverified.length ? ' + others' : ''}</span>
+        <span class="nlt-chevron">${nltUnverifiedExpanded ? '&minus;' : '+'}</span>
+      </button>` + (nltUnverifiedExpanded ? unverified.map(u => `
+      <div class="nlt-item nlt-item-unverified">
+        <span class="status-pill grey">Unverified</span>
+        <span class="mono">${escapeHtml(u.csNumber)}</span>
+        <span class="nlt-detail nlt-detail-muted">${escapeHtml(u.reason)}</span>
+      </div>
+    `).join('') : '');
+  }
+
+  body.innerHTML = clearLine + missItems + riskItems + unverifiedBlock;
 }
 
 function renderStats(list){
@@ -6184,6 +6396,42 @@ function renderStats(list){
     <div class="stat red"><div class="num">${counts.past_scheduled}</div><div class="lbl">Past Scheduled Pickup</div></div>
     <div class="stat red"><div class="num">${trailerPendingCount}</div><div class="lbl">Trailer Pending (Due)</div></div>
   `;
+}
+
+// The expanded panel under a shipment row: route stops, the projected schedule, the
+// late-departure reason, the stop log and every location ping. Built only for rows that
+// are actually open — the board used to render all of this for every shipment on every
+// re-render and then hide it, which on a full board is the majority of the markup.
+function shipmentDetailHtml(s){
+  if(!s) return '';
+  const routeStops = s.routeStops || [];
+  const updates = s.updates || [];
+  const stopLog = s.stopLog || {};
+  const stopNums = Object.keys(stopLog);
+  const late = isLateDeparture(s);
+  return `
+      ${renderRouteStopsDetails(routeStops, s)}
+      ${renderProjectedSchedule(s.projectedSchedule)}
+      ${renderLateDepartureReason(s)}
+      ${renderCooltraxFlag(s)}
+      ${stopNums.length ? `<div class="hist-item"><b>Stop log</b></div>` + stopNums.sort((a,b)=>a-b).map(n => {
+          const st = stopLog[n];
+          return `<div class="hist-item">Stop ${escapeHtml(n)} — Arrival ${escapeHtml(st.arrival||'—')} — Departure ${escapeHtml(st.departure||'—')}</div>`;
+        }).join('') : ''}
+      ${updates.length ? `<div class="hist-item" style="margin-top:6px;"><b>Location pings</b></div>` : ''}
+      ${updates.slice().reverse().map(u => {
+        const etaMeta = etaConfidenceMeta(u.etaSource || '');
+        return `<div class="hist-item"><b>${escapeHtml(new Date(u.timestamp).toLocaleString())}</b> — ${escapeHtml(u.location||'no location')} — ETA ${escapeHtml(u.eta||'—')} <span class="eta-confidence ${etaMeta.cls}" title="${escapeAttr(etaMeta.title)}">${escapeHtml(etaMeta.label)}</span></div>`;
+      }).join('') || (routeStops.length || stopNums.length || late || s.cooltraxFlag ? '' : '<div class="hist-item">No updates yet.</div>')}
+  `;
+}
+
+// Typing in the search box used to rebuild the whole board on every keystroke. One
+// frame of coalescing keeps it responsive on a full board without feeling delayed.
+let queuedLogRender = null;
+function queueLogRender(){
+  if(queuedLogRender) clearTimeout(queuedLogRender);
+  queuedLogRender = setTimeout(() => { queuedLogRender = null; renderLog(); }, 120);
 }
 
 function renderLog(){
@@ -6217,9 +6465,14 @@ function renderLog(){
     }
     return true;
   });
+  // Sort keys are computed once per shipment rather than once per comparison. The
+  // 'NLT Leave By' key walks the whole route through the store lookup, so recomputing
+  // it inside the comparator cost O(n log n) route walks for an O(n) amount of data.
+  const sortKeys = new Map();
+  list.forEach(s => sortKeys.set(s, trackingLogSortValue(s, logSort.field)));
   list.sort((a,b) => {
-    const av = trackingLogSortValue(a, logSort.field);
-    const bv = trackingLogSortValue(b, logSort.field);
+    const av = sortKeys.get(a);
+    const bv = sortKeys.get(b);
     const cmp = (typeof av === 'number' && typeof bv === 'number')
       ? av - bv
       : String(av).localeCompare(String(bv), undefined, {numeric:true});
@@ -6288,6 +6541,8 @@ function renderLog(){
     <th>Status</th><th></th>
   </tr></thead><tbody>`;
 
+  assignedTrailerOwners = buildAssignedTrailerOwners();
+  try{
   list.forEach(s=>{
     const status = getStatus(s);
     const meta = statusMeta(status, s);
@@ -6311,46 +6566,37 @@ function renderLog(){
     const late = isLateDeparture(s);
     const hasHistory = routeStops.length || updates.length || stopNums.length || late || s.cooltraxFlag;
     const expanded = openHistoryIds.has(s.csNumber);
-    const domCs = sanitizeKey(s.csNumber); // stable element ids so a re-render can put focus back
+    const domCs = domKey(s.csNumber); // stable element ids so a re-render can put focus back
     html += `<tr class="${rowCls}">
-      <td><input type="checkbox" class="log-select-row" data-cs="${escapeAttr(s.csNumber)}" ${selectedLogShipments.has(s.csNumber) ? 'checked' : ''} onchange="toggleLogShipmentSelection('${escapeAttr(s.csNumber)}', this.checked)" title="Select ${escapeAttr(s.csNumber)}"></td>
-      <td>${hasHistory ? `<button class="expand-btn" id="expander-${escapeAttr(sanitizeKey(s.csNumber))}" onclick="toggleHistory('${s.csNumber}')" title="Expand shipment details">${expanded ? '&minus;' : '+'}</button>` : ''}</td>
-      <td class="mono">${s.csNumber}</td>
-      <td><span class="commodity-pill" title="${escapeAttr(s.commodityShipper||'')}">${s.commodityShipper||'—'}</span></td>
+      <td><input type="checkbox" class="log-select-row" data-cs="${escapeAttr(s.csNumber)}" ${selectedLogShipments.has(s.csNumber) ? 'checked' : ''} onchange="toggleLogShipmentSelection('${jsArg(s.csNumber)}', this.checked)" title="Select ${escapeAttr(s.csNumber)}"></td>
+      <td>${hasHistory ? `<button class="expand-btn" id="expander-${domKey(s.csNumber)}" onclick="toggleHistory('${jsArg(s.csNumber)}')" title="Expand shipment details">${expanded ? '&minus;' : '+'}</button>` : ''}</td>
+      <td class="mono">${escapeHtml(s.csNumber)}</td>
+      <td><span class="commodity-pill" title="${escapeAttr(s.commodityShipper||'')}">${escapeHtml(s.commodityShipper||'—')}</span></td>
       <td>${stopsCell}</td>
-      <td class="mono" title="${escapeAttr(releaseDisplayForShipment(s))}">${releaseDisplayForShipment(s)||'—'}</td>
+      <td class="mono" title="${escapeAttr(releaseDisplayForShipment(s))}">${escapeHtml(releaseDisplayForShipment(s)||'—')}</td>
       <td>${latestDepartureCellHtml(s)}</td>
       <td><span class="status-pill ${pickup.cls}">${pickup.label}</span></td>
-      <td class="mono"><input type="text" id="trl-${domCs}" class="inline-edit mono" value="${escapeAttr(s.trailerNumber||'')}" placeholder="Trailer#" onblur="updateLogTextField('${s.csNumber}', 'trailerNumber', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
-      <td title="${escapeAttr(summaryConsignee||'')}">${summaryConsignee||'—'}</td>
-      <td><input type="text" id="conf-${domCs}" class="inline-edit" value="${escapeAttr(s.confirmedLocation||'')}" placeholder="Not confirmed" onblur="updateConfirmedLocation('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td class="mono"><input type="text" id="trl-${domCs}" class="inline-edit mono" value="${escapeAttr(s.trailerNumber||'')}" placeholder="Trailer#" onblur="updateLogTextField('${jsArg(s.csNumber)}', 'trailerNumber', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td title="${escapeAttr(summaryConsignee||'')}">${escapeHtml(summaryConsignee||'—')}</td>
+      <td><input type="text" id="conf-${domCs}" class="inline-edit" value="${escapeAttr(s.confirmedLocation||'')}" placeholder="Not confirmed" onblur="updateConfirmedLocation('${jsArg(s.csNumber)}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
       <td class="col-seam">${renderLogEmptyTrailerCell(s)}</td>
-      <td class="mono"><input type="text" id="trk-${domCs}" class="inline-edit mono" value="${escapeAttr(s.truckNumber||'')}" placeholder="Truck#" onblur="updateLogTextField('${s.csNumber}', 'truckNumber', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
-      <td title="${escapeAttr(s.driverName||'')}"><input type="text" id="drv-${domCs}" class="inline-edit" value="${escapeAttr(s.driverName||'')}" placeholder="Driver" onblur="updateLogTextField('${s.csNumber}', 'driverName', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
-      <td><input type="text" inputmode="numeric" maxlength="5" id="dep-${domCs}" class="inline-edit time-mask" value="${escapeAttr(departedTime)}" placeholder="HH:MM" onfocus="prepareTimeMask(this)" oninput="handleTimeMaskInput(this)" onblur="finishTimeMask(this);updateDepartureTime('${s.csNumber}', this.value)" onkeydown="handleTimeMaskKeydown(event)">${late ? `<button class="late-badge" onclick="toggleHistory('${s.csNumber}')" title="${escapeAttr(lateDepartureLabel(s))} — click for reason">Late</button><span class="late-delta">${escapeHtml(formatDurationMinutes(lateDepartureMinutes(s)))}</span>` : ''}</td>
-      <td class="cell-live cell-live-start"><input type="text" id="loc-${domCs}" class="inline-edit${lastLocationStale ? ' stale-prompt' : ''}" value="${escapeAttr(lastLocationStale ? '' : (last ? last.location||'' : ''))}" placeholder="${lastLocationStale ? 'Needs update — City, ST' : 'City, ST'}" onblur="updateLastLocationFromLog('${s.csNumber}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td class="mono"><input type="text" id="trk-${domCs}" class="inline-edit mono" value="${escapeAttr(s.truckNumber||'')}" placeholder="Truck#" onblur="updateLogTextField('${jsArg(s.csNumber)}', 'truckNumber', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td title="${escapeAttr(s.driverName||'')}"><input type="text" id="drv-${domCs}" class="inline-edit" value="${escapeAttr(s.driverName||'')}" placeholder="Driver" onblur="updateLogTextField('${jsArg(s.csNumber)}', 'driverName', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td><input type="text" inputmode="numeric" maxlength="5" id="dep-${domCs}" class="inline-edit time-mask" value="${escapeAttr(departedTime)}" placeholder="HH:MM" onfocus="prepareTimeMask(this)" oninput="handleTimeMaskInput(this)" onblur="finishTimeMask(this);updateDepartureTime('${jsArg(s.csNumber)}', this.value)" onkeydown="handleTimeMaskKeydown(event)">${late ? `<button class="late-badge" onclick="toggleHistory('${jsArg(s.csNumber)}')" title="${escapeAttr(lateDepartureLabel(s))} — click for reason">Late</button><span class="late-delta">${escapeHtml(formatDurationMinutes(lateDepartureMinutes(s)))}</span>` : ''}</td>
+      <td class="cell-live cell-live-start"><input type="text" id="loc-${domCs}" class="inline-edit${lastLocationStale ? ' stale-prompt' : ''}" value="${escapeAttr(lastLocationStale ? '' : (last ? last.location||'' : ''))}" placeholder="${lastLocationStale ? 'Needs update — City, ST' : 'City, ST'}" onblur="updateLastLocationFromLog('${jsArg(s.csNumber)}', this.value)" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
       <td class="cell-live cell-live-end cell-eta mono">${etaDisplayHtml(s, last, lastLocationStale)}</td>
       <td><span class="status-pill ${meta.cls}">${meta.label}</span></td>
       <td>
-        <button class="del-btn" onclick="confirmClick(this, () => deleteShipment('${s.csNumber}'))" title="Delete">&times;</button>
+        <button class="del-btn" onclick="confirmClick(this, () => deleteShipment('${jsArg(s.csNumber)}'))" title="Delete">&times;</button>
       </td>
     </tr>
-    <tr class="hist-row" id="hist-${s.csNumber}" style="display:none;"><td colspan="19">
-      ${renderRouteStopsDetails(routeStops, s)}
-      ${renderProjectedSchedule(s.projectedSchedule)}
-      ${renderLateDepartureReason(s)}
-      ${renderCooltraxFlag(s)}
-      ${stopNums.length ? `<div class="hist-item"><b>Stop log</b></div>` + stopNums.sort((a,b)=>a-b).map(n => {
-          const st = stopLog[n];
-          return `<div class="hist-item">Stop ${n} — Arrival ${st.arrival||'—'} — Departure ${st.departure||'—'}</div>`;
-        }).join('') : ''}
-      ${updates.length ? `<div class="hist-item" style="margin-top:6px;"><b>Location pings</b></div>` : ''}
-      ${updates.slice().reverse().map(u => {
-        const etaMeta = etaConfidenceMeta(u.etaSource || '');
-        return `<div class="hist-item"><b>${new Date(u.timestamp).toLocaleString()}</b> — ${escapeHtml(u.location||'no location')} — ETA ${escapeHtml(u.eta||'—')} <span class="eta-confidence ${etaMeta.cls}" title="${escapeAttr(etaMeta.title)}">${escapeHtml(etaMeta.label)}</span></div>`;
-      }).join('') || (routeStops.length || stopNums.length || late || s.cooltraxFlag ? '' : '<div class="hist-item">No updates yet.</div>')}
-    </td></tr>`;
+    <tr class="hist-row" id="hist-${domCs}" style="display:none;"><td colspan="19" id="histbody-${domCs}">${expanded ? shipmentDetailHtml(s) : ''}</td></tr>`;
   });
+  } finally {
+    // Must not outlive the render: isEmptyTrailerAssigned trusts it while it is set, and
+    // a stale index would keep rejecting a trailer that has since been released.
+    assignedTrailerOwners = null;
+  }
   html += `</tbody></table>`;
   suppressInlineCommit = true;
   try{
@@ -6359,7 +6605,7 @@ function renderLog(){
     suppressInlineCommit = false;
   }
   openHistoryIds.forEach(cs => {
-    const row = document.getElementById('hist-'+cs);
+    const row = document.getElementById('hist-' + domKey(cs));
     if(row) row.style.display = 'table-row';
   });
   syncSelectedLogDeleteButton();
@@ -6604,27 +6850,23 @@ async function renderHistory(){
     <th>Departed</th><th>State</th><th>Completed</th><th>NLT Miss Preview</th>
   </tr></thead><tbody>` + list.map(h => {
     const hasDetails = (h.routeStops || []).length || isLateDeparture(h);
-    const domCs = sanitizeKey(h.csNumber);
+    const domCs = domKey(h.csNumber);
     const expanded = openArchivedHistoryIds.has(h.csNumber);
     return `<tr>
-    <td><input type="checkbox" class="history-select-row" data-cs="${escapeAttr(h.csNumber)}" ${selectedHistoryShipments.has(h.csNumber) ? 'checked' : ''} onchange="toggleHistoryShipmentSelection('${escapeAttr(h.csNumber)}', this.checked)" title="Select ${escapeAttr(h.csNumber)}"></td>
-    <td>${hasDetails ? `<button class="expand-btn" id="history-expander-${escapeAttr(domCs)}" onclick="toggleArchivedHistory('${escapeAttr(h.csNumber)}')" title="Expand completed shipment">${expanded ? '&minus;' : '+'}</button>` : ''}</td>
-    <td class="mono">${h.csNumber}</td>
-    <td><span class="commodity-pill">${normalizeCommodityShipperLabel(h.commodityShipper)||'—'}</span></td>
-    <td>${h.consignee||'—'}</td>
-    <td class="mono">${h.trailerNumber||'—'}</td>
-    <td class="mono">${h.truckNumber||'—'}</td>
-    <td>${h.driverName||'—'}</td>
-    <td class="mono">${h.departureTime||'—'}</td>
-    <td><span class="status-pill grey">${h.currentState||'—'}</span></td>
-    <td>${h.completedAt ? new Date(h.completedAt).toLocaleString() : '—'}</td>
+    <td><input type="checkbox" class="history-select-row" data-cs="${escapeAttr(h.csNumber)}" ${selectedHistoryShipments.has(h.csNumber) ? 'checked' : ''} onchange="toggleHistoryShipmentSelection('${jsArg(h.csNumber)}', this.checked)" title="Select ${escapeAttr(h.csNumber)}"></td>
+    <td>${hasDetails ? `<button class="expand-btn" id="history-expander-${domCs}" onclick="toggleArchivedHistory('${jsArg(h.csNumber)}')" title="Expand completed shipment">${expanded ? '&minus;' : '+'}</button>` : ''}</td>
+    <td class="mono">${escapeHtml(h.csNumber)}</td>
+    <td><span class="commodity-pill">${escapeHtml(normalizeCommodityShipperLabel(h.commodityShipper)||'—')}</span></td>
+    <td>${escapeHtml(h.consignee||'—')}</td>
+    <td class="mono">${escapeHtml(h.trailerNumber||'—')}</td>
+    <td class="mono">${escapeHtml(h.truckNumber||'—')}</td>
+    <td>${escapeHtml(h.driverName||'—')}</td>
+    <td class="mono">${escapeHtml(h.departureTime||'—')}</td>
+    <td><span class="status-pill grey">${escapeHtml(h.currentState||'—')}</span></td>
+    <td>${escapeHtml(h.completedAt ? new Date(h.completedAt).toLocaleString() : '—')}</td>
     <td>${renderHistoryNltMissPreview(h)}</td>
   </tr>
-  <tr class="hist-row" id="history-detail-${escapeAttr(domCs)}" style="display:${expanded ? 'table-row' : 'none'};"><td colspan="12">
-    ${renderHistoryNltMissDetail(h)}
-    ${renderHistoryRouteStopsDetails(h)}
-    ${renderHistoryLateDepartureReason(h)}
-  </td></tr>`;
+  <tr class="hist-row" id="history-detail-${domCs}" style="display:${expanded ? 'table-row' : 'none'};"><td colspan="12" id="history-detailbody-${domCs}">${expanded ? historyDetailHtml(h) : ''}</td></tr>`;
   }).join('') + `</tbody></table>`;
   syncSelectedHistoryDeleteButton();
 }
@@ -6727,11 +6969,29 @@ async function deleteSelectedHistoryShipments(){
   showToast(`Deleted ${selected.length} History shipment${selected.length===1?'':'s'}`);
 }
 
+// The detail panel under a completed load, built only for rows that are open — same
+// reasoning as shipmentDetailHtml on the Tracking Log.
+function historyDetailHtml(h){
+  if(!h) return '';
+  return `
+    ${renderHistoryNltMissDetail(h)}
+    ${renderHistoryRouteStopsDetails(h)}
+    ${renderHistoryLateDepartureReason(h)}
+  `;
+}
+
 function toggleArchivedHistory(cs){
-  const domCs = sanitizeKey(cs);
+  const domCs = domKey(cs);
   const row = document.getElementById('history-detail-' + domCs);
   if(!row) return;
   const opening = row.style.display === 'none';
+  if(opening){
+    const body = document.getElementById('history-detailbody-' + domCs);
+    if(body && !body.innerHTML.trim()){
+      const record = historyList.find(h => h.csNumber === cs);
+      if(record) body.innerHTML = historyDetailHtml(record);
+    }
+  }
   row.style.display = opening ? 'table-row' : 'none';
   if(opening) openArchivedHistoryIds.add(cs); else openArchivedHistoryIds.delete(cs);
   const btn = document.getElementById('history-expander-' + domCs);
@@ -6742,7 +7002,7 @@ function renderHistoryRouteStopsDetails(shipment){
   const routeStops = dedupeRouteStops((shipment && shipment.routeStops) || []);
   if(!routeStops.length) return '';
   const cs = shipment.csNumber || '';
-  const domCs = sanitizeKey(cs);
+  const domCs = domKey(cs);
   return `<div class="hist-item"><b>Completed carrier stop details</b></div>
     <table class="route-stop-table">
       <thead><tr>
@@ -6755,9 +7015,9 @@ function renderHistoryRouteStopsDetails(shipment){
           <td>${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
           <td class="mono">${escapeHtml(nltForRouteStop(shipment, st))||'—'}</td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'arrivalDate', st.arrivalDate, true)}</td>
-          <td><input type="checkbox" id="history-stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateHistoryRouteStopField('${escapeAttr(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'history-stopcell-${domCs}',${i},'arrived')"></td>
+          <td><input type="checkbox" id="history-stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateHistoryRouteStopField('${jsArg(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'history-stopcell-${domCs}',${i},'arrived')"></td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'departureDate', st.departureDate, true)}</td>
-          <td><input type="checkbox" id="history-stopcell-${domCs}-${i}-completed" ${st.completed ? 'checked' : ''} onchange="updateHistoryRouteStopField('${escapeAttr(cs)}', ${i}, 'completed', this.checked)" onkeydown="handleStopGridNav(event,'history-stopcell-${domCs}',${i},'completed')"></td>
+          <td><input type="checkbox" id="history-stopcell-${domCs}-${i}-completed" ${st.completed ? 'checked' : ''} onchange="updateHistoryRouteStopField('${jsArg(cs)}', ${i}, 'completed', this.checked)" onkeydown="handleStopGridNav(event,'history-stopcell-${domCs}',${i},'completed')"></td>
         </tr>`).join('')}
       </tbody>
     </table>`;
@@ -6766,7 +7026,7 @@ function renderHistoryRouteStopsDetails(shipment){
 function renderHistoryLateDepartureReason(shipment){
   if(!isLateDeparture(shipment)) return '';
   const cs = shipment && shipment.csNumber || '';
-  const domCs = sanitizeKey(cs);
+  const domCs = domKey(cs);
   const departed = effectiveDepartureTime(shipment) || '—';
   const release = releaseDisplayForShipment(shipment) || shipment.scheduleRelease || '—';
   const lateBy = lateDepartureLabel(shipment);
@@ -6774,7 +7034,7 @@ function renderHistoryLateDepartureReason(shipment){
     <b>Late Departure</b> — ${escapeHtml(lateBy)}. Departed ${escapeHtml(departed)} after Pick Up Start ${escapeHtml(release)}
     <div class="late-reason-edit">
       <input type="text" id="history-late-reason-${domCs}" class="inline-edit" value="${escapeAttr(shipment.lateDepartureReason || '')}" placeholder="Enter late departure reason">
-      <button class="btn-primary" onclick="updateHistoryLateDepartureReason('${escapeAttr(cs)}', document.getElementById('history-late-reason-${domCs}').value)">Save Reason</button>
+      <button class="btn-primary" onclick="updateHistoryLateDepartureReason('${jsArg(cs)}', document.getElementById('history-late-reason-${domCs}').value)">Save Reason</button>
     </div>
   </div>`;
 }
@@ -7406,13 +7666,22 @@ async function deleteSelectedBackhaulHistory(){
 }
 
 function toggleBackhaulDetails(loadNumber){
-  const row = document.getElementById('backhaul-detail-' + sanitizeKey(loadNumber));
+  const domLoad = domKey(loadNumber);
+  const row = document.getElementById('backhaul-detail-' + domLoad);
   if(!row) return;
   const opening = row.style.display === 'none';
+  // Detail panels render on first open, same as the Tracking Log and History rows.
+  if(opening){
+    const body = document.getElementById('backhaul-detailbody-' + domLoad);
+    if(body && !body.innerHTML.trim()){
+      const record = backhauls[loadNumber] || historyBackhaulByLoad(loadNumber);
+      if(record) body.innerHTML = renderBackhaulDetails(record);
+    }
+  }
   row.style.display = opening ? 'table-row' : 'none';
   if(opening) openBackhaulIds.add(loadNumber);
   else openBackhaulIds.delete(loadNumber);
-  const btn = document.getElementById('backhaul-expander-' + sanitizeKey(loadNumber));
+  const btn = document.getElementById('backhaul-expander-' + domKey(loadNumber));
   if(btn) btn.innerHTML = opening ? '&minus;' : '+';
 }
 
@@ -7572,20 +7841,25 @@ function setBackhaulDropdownSearch(field, value, isHistory){
   else renderBackhaulLog();
 }
 
+// Same lazy-panel treatment as the Tracking Log: twelve backhaul columns each rendering
+// every distinct value into a hidden panel was the bulk of a backhaul re-render.
 function backhaulFilterDropdownHtml(field, label, isHistory){
-  const values = backhaulDistinctValues(field, isHistory);
   const ctx = backhaulContextState(isHistory);
   const selected = ctx.filters[field];
   const isOpen = ctx.open === field;
-  const search = (ctx.search[field] || '').toLowerCase();
-  const visibleValues = search ? values.filter(v => String(v).toLowerCase().includes(search)) : values;
   const count = selected.length;
-  return `<div class="cf-dropdown${isOpen?' open':''}">
-    <button type="button" class="cf-trigger${count?' active':''}" onclick="toggleBackhaulFilterDropdown('${field}', ${isHistory})">
+  const trigger = `<button type="button" class="cf-trigger${count?' active':''}" onclick="toggleBackhaulFilterDropdown('${field}', ${isHistory})">
       ${label}${count ? `<span class="cf-badge">${count}</span>` : ''}
       <span class="cf-arrow">${isOpen?'&#9652;':'&#9662;'}</span>
-    </button>
-    <div class="cf-panel" style="display:${isOpen?'block':'none'};">
+    </button>`;
+  if(!isOpen) return `<div class="cf-dropdown">${trigger}</div>`;
+
+  const values = backhaulDistinctValues(field, isHistory);
+  const search = (ctx.search[field] || '').toLowerCase();
+  const visibleValues = search ? values.filter(v => String(v).toLowerCase().includes(search)) : values;
+  return `<div class="cf-dropdown open">
+    ${trigger}
+    <div class="cf-panel" style="display:block;">
       ${values.length > 6 ? `<input type="text" id="bhcfsearch-${isHistory ? 'history' : 'active'}-${field}" class="cf-search" placeholder="Search ${label}..." value="${escapeAttr(ctx.search[field]||'')}" oninput="setBackhaulDropdownSearch('${field}', this.value, ${isHistory})">` : ''}
       <div class="cf-actions">
         <button type="button" class="cf-link" onclick="clearBackhaulFilterValues('${field}', ${isHistory})">Clear</button>
@@ -7704,11 +7978,11 @@ function backhaulTableHtml(rows, isHistory){
   </tr></thead><tbody>` + rows.map(b => {
     const late = backhaulLateInfo(b);
     const expanded = openBackhaulIds.has(b.loadNumber);
-    const domLoad = sanitizeKey(b.loadNumber);
+    const domLoad = domKey(b.loadNumber);
     const detailColspan = 14;
     return `<tr class="${late.late ? 'row-backhaul-late' : ''}">
-      <td><input type="checkbox" class="${isHistory ? 'backhaul-history-select-row' : 'backhaul-select-row'}" data-load-number="${escapeAttr(b.loadNumber)}" ${selection.has(b.loadNumber) ? 'checked' : ''} onchange="${isHistory ? `toggleBackhaulHistorySelection('${escapeAttr(b.loadNumber)}', this.checked)` : `toggleBackhaulSelection('${escapeAttr(b.loadNumber)}', this.checked)`}" title="Select ${escapeAttr(b.loadNumber)}"></td>
-      <td><button class="expand-btn" id="backhaul-expander-${escapeAttr(domLoad)}" onclick="toggleBackhaulDetails('${escapeAttr(b.loadNumber)}')" title="Expand backhaul details">${expanded ? '&minus;' : '+'}</button></td>
+      <td><input type="checkbox" class="${isHistory ? 'backhaul-history-select-row' : 'backhaul-select-row'}" data-load-number="${escapeAttr(b.loadNumber)}" ${selection.has(b.loadNumber) ? 'checked' : ''} onchange="${isHistory ? `toggleBackhaulHistorySelection('${jsArg(b.loadNumber)}', this.checked)` : `toggleBackhaulSelection('${jsArg(b.loadNumber)}', this.checked)`}" title="Select ${escapeAttr(b.loadNumber)}"></td>
+      <td><button class="expand-btn" id="backhaul-expander-${domLoad}" onclick="toggleBackhaulDetails('${jsArg(b.loadNumber)}')" title="Expand backhaul details">${expanded ? '&minus;' : '+'}</button></td>
       <td class="mono">${escapeHtml(b.loadNumber)}</td>
       <td><span class="status-pill ${backhaulStatusPillClass(b.status, late.late)}">${escapeHtml(b.status)||'—'}</span></td>
       <td class="mono" title="${escapeAttr(b.purchaseOrders ? ('Equipment: ' + (b.equipmentType || '—')) : 'No PO found - showing equipment fallback')}">${escapeHtml(backhaulPoDisplay(b))||'—'}</td>
@@ -7722,9 +7996,7 @@ function backhaulTableHtml(rows, isHistory){
       <td class="mono">${escapeHtml(b.trailerNumber)||'—'}</td>
       <td>${late.late ? `<span class="status-pill bh-late">${escapeHtml(late.label)}</span><span class="late-delta">${escapeHtml(formatDurationMinutes(late.minutes))}</span>` : '<span class="status-pill bh-complete">OK</span>'}</td>
     </tr>
-    <tr class="hist-row" id="backhaul-detail-${escapeAttr(domLoad)}" style="display:${expanded ? 'table-row' : 'none'};"><td colspan="${detailColspan}">
-      ${renderBackhaulDetails(b)}
-    </td></tr>`;
+    <tr class="hist-row" id="backhaul-detail-${domLoad}" style="display:${expanded ? 'table-row' : 'none'};"><td colspan="${detailColspan}" id="backhaul-detailbody-${domLoad}">${expanded ? renderBackhaulDetails(b) : ''}</td></tr>`;
   }).join('') + `</tbody></table>`;
 }
 
@@ -8135,6 +8407,51 @@ function commodityLabelForKpi(shipment){
   return normalized || resolved.value || 'Unknown';
 }
 
+// An empty on-time/late tally. Both the commodity breakdown and the daily trend fill
+// one of these per bucket, so the definition of "measured" lives in exactly one place.
+function emptyDeliveryTally(extra){
+  return Object.assign({ totalStops:0, measured:0, onTime:0, late:0, missingNlt:0, lateMinutesTotal:0 }, extra || {});
+}
+
+// Scores one store stop against its NLT into a tally. A stop with no arrival is counted
+// as a store stop and nothing else; a stop we can't pair to a deadline is counted as
+// missing rather than quietly passing as on time.
+function tallyStoreStopAgainstNlt(tally, shipment, stop){
+  tally.totalStops++;
+  const arrival = parseCarrierDateTime(stop.arrivalDate);
+  if(!arrival) return;
+  const info = nltEntryFor(shipment, stop);
+  if(info.status !== 'ok'){ tally.missingNlt++; return; }
+  const deadline = nltDeadlineForStop(shipment, stop, arrival, info);
+  if(!deadline){ tally.missingNlt++; return; }
+  const lateMinutes = minutesBetween(arrival, deadline);
+  tally.measured++;
+  if(lateMinutes !== null && lateMinutes <= 0){
+    tally.onTime++;
+  } else {
+    tally.late++;
+    tally.lateMinutesTotal += Math.max(0, lateMinutes || 0);
+  }
+}
+
+// Store stops in the range, grouped by operating day — the input to the delivery trend
+// chart. Days with no store stops still get a bucket so the axis stays continuous.
+function dailyDeliveryTrendRows(startStr, endStr){
+  const range = inclusiveDateRange(startStr || todayStr(), endStr || startStr || todayStr());
+  const byDate = {};
+  for(let d = new Date(range.start); d < range.exclusiveEnd; d.setDate(d.getDate() + 1)){
+    byDate[localIsoDate(d)] = emptyDeliveryTally({ date: localIsoDate(d) });
+  }
+  Object.values(shipments).concat(historyList || []).forEach(s => {
+    const serviceDate = shipmentServiceDate(s);
+    if(!isoDateInRange(serviceDate, range.start, range.exclusiveEnd)) return;
+    const tally = byDate[serviceDate];
+    if(!tally) return;
+    (s.routeStops || []).filter(isStoreRouteStop).forEach(st => tallyStoreStopAgainstNlt(tally, s, st));
+  });
+  return Object.keys(byDate).sort().map(date => byDate[date]);
+}
+
 function dailyOnTimeDeliveryKpiRows(startStr, endStr){
   const range = inclusiveDateRange(startStr || todayStr(), endStr || startStr || todayStr());
   const rows = Object.values(shipments).concat(historyList || []);
@@ -8143,45 +8460,14 @@ function dailyOnTimeDeliveryKpiRows(startStr, endStr){
     if(!isoDateInRange(shipmentServiceDate(s), range.start, range.exclusiveEnd)) return;
     const commodity = commodityLabelForKpi(s);
     (s.routeStops || []).filter(isStoreRouteStop).forEach(st => {
-      if(!byCommodity[commodity]){
-        byCommodity[commodity] = { commodity, totalStops:0, measured:0, onTime:0, late:0, missingNlt:0, lateMinutesTotal:0 };
-      }
-      const bucket = byCommodity[commodity];
-      bucket.totalStops++;
-      const arrival = parseCarrierDateTime(st.arrivalDate);
-      if(!arrival) return;
-      const info = nltEntryFor(s, st);
-      if(info.status !== 'ok'){
-        bucket.missingNlt++;
-        return;
-      }
-      const deadline = nltDeadlineForStop(s, st, arrival, info);
-      if(!deadline){
-        bucket.missingNlt++;
-        return;
-      }
-      const lateMinutes = minutesBetween(arrival, deadline);
-      bucket.measured++;
-      if(lateMinutes !== null && lateMinutes <= 0){
-        bucket.onTime++;
-      } else {
-        bucket.late++;
-        bucket.lateMinutesTotal += Math.max(0, lateMinutes || 0);
-      }
+      if(!byCommodity[commodity]) byCommodity[commodity] = emptyDeliveryTally({ commodity });
+      tallyStoreStopAgainstNlt(byCommodity[commodity], s, st);
     });
   });
   STORE_RUN_COMMODITY_ORDER.forEach(code => {
     const hasCommodity = Object.values(byCommodity).some(row => commodityCodeForSort(row.commodity) === code);
     if(!hasCommodity){
-      byCommodity[STORE_RUN_COMMODITY_LABELS[code]] = {
-        commodity: STORE_RUN_COMMODITY_LABELS[code],
-        totalStops:0,
-        measured:0,
-        onTime:0,
-        late:0,
-        missingNlt:0,
-        lateMinutesTotal:0
-      };
+      byCommodity[STORE_RUN_COMMODITY_LABELS[code]] = emptyDeliveryTally({ commodity: STORE_RUN_COMMODITY_LABELS[code] });
     }
   });
   return Object.values(byCommodity)
@@ -8299,6 +8585,88 @@ function computeWeeklyKpis(startStr, endStr){
   };
 }
 
+// Daily delivery trend — one column per operating day, split into store stops that beat
+// their NLT and stops that missed it. One axis (stop count), so the height of a column is
+// volume and the split inside it is performance; the on-time share is direct-labelled on
+// top rather than drawn as a second scale.
+//
+// On-time and late are the reserved status colors, and red/green is the pair colorblind
+// readers lose first, so they are separated on lightness as well as hue (validated: worst
+// adjacent deutan dE 19.1) and carry a legend, direct labels, a 2px surface gap between
+// segments and a hatched fill on the late segment. Never identity alone.
+function renderDeliveryTrendChart(rows){
+  // A column is only as tall as what it draws. Store stops with no recorded arrival can
+  // be neither on time nor late, so they are not in the height, the peak, or the day
+  // filter — the tooltip reports them separately as the day's recording gap.
+  const recorded = r => r.measured + r.missingNlt;
+  const days = (rows || []).filter(r => recorded(r) > 0);
+  if(days.length < 2) return ''; // a single day is what the tiles above already say
+
+  const W = 900, H = 226, PAD_X = 14, PAD_T = 34, PAD_B = 30, GAP = 2;
+  const plotH = H - PAD_T - PAD_B;
+  const peak = Math.max(1, ...days.map(recorded));
+  // One column per day over a free-form range, so labels are thinned to whatever the
+  // width can actually hold rather than overprinting each other at a month view.
+  const labelEvery = Math.ceil(days.length / 14);
+  const step = (W - PAD_X * 2) / days.length;
+  const barW = Math.min(58, Math.max(9, step * 0.58));
+  const base = PAD_T + plotH;
+  const scale = v => (v / peak) * plotH;
+
+  const columns = days.map((r, i) => {
+    const x = PAD_X + step * i + (step - barW) / 2;
+    let y = base;
+    const seg = (value, cls, fill) => {
+      const h = scale(value);
+      if(h <= 0) return '';
+      const drawn = Math.max(2, h - GAP);
+      y -= h;
+      return `<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${drawn.toFixed(1)}" rx="3"${fill || ''}></rect>`;
+    };
+    const stack = seg(r.onTime, 'trend-ontime')
+      + seg(r.late, 'trend-late', ' fill="url(#trendHatch)"')
+      + seg(r.missingNlt, 'trend-missing');
+    const pct = r.measured ? Math.round((r.onTime / r.measured) * 100) : null;
+    const label = pct === null ? ''
+      : `<text class="trend-value" x="${(x + barW / 2).toFixed(1)}" y="${Math.max(16, y - 8).toFixed(1)}">${pct}%</text>`;
+    const dayLabel = new Date(r.date + 'T12:00:00').toLocaleDateString(undefined, {month:'numeric', day:'numeric'});
+    const pending = Math.max(0, r.totalStops - recorded(r));
+    const tip = `${dayLabel}: ${r.onTime} on time, ${r.late} late${r.missingNlt ? ', ' + r.missingNlt + ' missing NLT' : ''}`
+      + ` — ${recorded(r)} of ${r.totalStops} store stop${r.totalStops === 1 ? '' : 's'} recorded`
+      + (pending ? `, ${pending} awaiting arrival` : '');
+    return `<g class="trend-col">
+      <rect class="trend-hit" x="${(PAD_X + step * i).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${base}"><title>${escapeHtml(tip)}</title></rect>
+      ${stack}${i % labelEvery === 0 ? label : ''}
+      ${i % labelEvery === 0 ? `<text class="trend-axis" x="${(x + barW / 2).toFixed(1)}" y="${H - 10}">${escapeHtml(dayLabel)}</text>` : ''}
+    </g>`;
+  }).join('');
+
+  return `<section class="kpi-panel">
+    <div class="kpi-panel-head">
+      <div>
+        <h3>Delivery Trend</h3>
+        <div class="hint">Store stops with a recorded arrival, per operating day, split by NLT outcome. Column height is that day's recorded volume; the label is the on-time share of measured stops. Peak day ${peak} stop${peak === 1 ? '' : 's'}. Hover a column for the full count.</div>
+      </div>
+      <div class="chart-legend">
+        <span><i class="swatch swatch-ontime"></i>On time</span>
+        <span><i class="swatch swatch-late"></i>Late</span>
+        <span><i class="swatch swatch-missing"></i>Missing NLT</span>
+      </div>
+    </div>
+    <svg class="trend-chart" viewBox="0 0 ${W} ${H}" role="img"
+         aria-label="Store stops with a recorded arrival per operating day, each column split into on time, late, and missing NLT. Peak ${peak} stops in a day.">
+      <defs>
+        <pattern id="trendHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="6" height="6" fill="var(--chart-late)"></rect>
+          <line x1="0" y1="0" x2="0" y2="6" class="trend-hatch-line" stroke-width="2"></line>
+        </pattern>
+      </defs>
+      <line class="trend-base" x1="${PAD_X}" y1="${base}" x2="${W - PAD_X}" y2="${base}"></line>
+      ${columns}
+    </svg>
+  </section>`;
+}
+
 async function renderAdminData(){
   const content = document.getElementById('adminDataContent');
   if(!content) return;
@@ -8312,6 +8680,9 @@ async function renderAdminData(){
   const weekly = computeWeeklyKpis(adminKpiStartDate, adminKpiEndDate);
   const dailyNltRows = dailyNltMissRows(adminKpiStartDate, adminKpiEndDate);
   const storeServiceRows = storeServiceNltMissRows(adminKpiStartDate, adminKpiEndDate);
+  // Bars in the Store Service table are scaled against the worst store in the range, so
+  // the column ranks at a glance instead of having to be read numeral by numeral.
+  const worstStoreMisses = Math.max(1, ...storeServiceRows.map(r => r.misses || 0));
   const dailyDeliveryKpiRows = dailyOnTimeDeliveryKpiRows(adminKpiStartDate, adminKpiEndDate);
   const dailyTotalStoreStops = dailyDeliveryKpiRows.reduce((sum, r) => sum + (r.totalStops || 0), 0);
   const dailyMeasuredStops = dailyDeliveryKpiRows.reduce((sum, r) => sum + r.measured, 0);
@@ -8380,6 +8751,7 @@ async function renderAdminData(){
         </div>
       </section>
     </div>
+    ${renderDeliveryTrendChart(dailyDeliveryTrendRows(adminKpiStartDate, adminKpiEndDate))}
     ${dailyTotalStoreStops === 0
       ? `<div class="empty-state" style="margin-bottom:16px;"><b>No store stops for ${escapeHtml(rangeLabel)}.</b><br>KPI totals only count store delivery stops, not shippers or warehouses.</div>`
       : `<section class="kpi-panel"><div class="kpi-panel-head"><div><h3>Commodity Performance</h3><div class="hint">On-time delivery KPI and total store stops separated by commodity.</div></div></div><div class="commodity-kpi-grid">${dailyCommodityCards}</div></section>`}
@@ -8392,12 +8764,12 @@ async function renderAdminData(){
       </div>
       ${storeServiceRows.length === 0
         ? `<div class="empty-state"><b>No store NLT misses in this range.</b><br>Store Service only counts delivery stops with arrival times past their NLT.</div>`
-        : `<div style="max-height:360px;overflow:auto;"><table><thead><tr><th>CORP#</th><th>Store</th><th>City</th><th>NLT Misses</th><th>Shipments</th><th>Avg Late</th><th>Worst Late</th></tr></thead><tbody>
+        : `<div style="max-height:360px;overflow:auto;"><table><thead><tr><th>CORP#</th><th>Store</th><th>City</th><th style="width:16%;">NLT Misses</th><th>Shipments</th><th>Avg Late</th><th>Worst Late</th></tr></thead><tbody>
           ${storeServiceRows.map(r => `<tr>
             <td class="mono">${escapeHtml(r.corp ? 'CORP#' + r.corp : '—')}</td>
             <td>${escapeHtml(r.store)}</td>
             <td>${escapeHtml(r.city || '—')}</td>
-            <td><span class="status-pill red">${escapeHtml(r.misses)}</span></td>
+            <td><div class="bar-cell" title="${escapeAttr(r.misses + ' NLT miss' + (r.misses === 1 ? '' : 'es') + ' of ' + worstStoreMisses + ' at the worst store')}"><span class="bar-num">${escapeHtml(r.misses)}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.round((r.misses / worstStoreMisses) * 100)}%;"></span></span></div></td>
             <td class="mono">${escapeHtml(r.shipmentCount)}</td>
             <td class="mono">${escapeHtml(r.averageLate)}</td>
             <td class="mono">${escapeHtml(r.worstLate)}</td>

@@ -1,0 +1,68 @@
+# Code review pass — correctness, performance, visualization
+
+Reviewed `index.html` as a whole. Every item below is in the tree; the verification
+column says how each was checked rather than asserted.
+
+## Correctness
+
+| # | Problem | Fix | Verified by |
+|---|---------|-----|-------------|
+| 1 | `sanitizeKey` output was interpolated straight into `id="..."`. It strips only the characters Firebase rejects in a path, so a CS# containing `"` closed the attribute and everything after it parsed as more attributes — an import-supplied `onerror=` became a live handler. | New `domKey()` produces `[A-Za-z0-9_-]` only, with a short hash appended when characters were replaced so two CS#s can't collapse onto one id. Every element id now goes through it; `sanitizeKey` keeps its Firebase-path job. | Rendered a row with `CS"1<img src=x onerror=alert(1)>`: before, the `<img>` was a real element in the DOM; after, zero injected nodes and the expander works (it didn't before — the id mismatch broke it). |
+| 2 | Report-derived text went unescaped into inline handlers (`onclick="…('${s.csNumber}')"`) and into cell text. An apostrophe from an import broke every control on the row. | New `jsArg()` escapes for the JS string literal then the HTML attribute; applied to all 18 handler sites. Cell values escaped in the Tracking Log and History rows. | Handler attribute for a CS# containing `'`, `"` and markup parses and round-trips the exact string. |
+| 3 | `cascadeRouteStopEvents` anchored on `new Date()` when the clicked event had no timestamp. `applyCloseoutRows` writes `departureDate` and *then* ticks Arrived, so the whole back-fill was anchored to import time — the last stop got an arrival later than its own departure. | The anchor now comes from a time on the clicked stop itself (arrival ± dwell) before it falls back to now. | Close-out sequence on a 3-stop route: no arrival-after-departure anywhere. |
+| 4 | The backward walk only ever subtracted synthetic drive/dwell estimates, so a back-fill could stamp an arrival earlier than a departure a dispatcher had typed. | Re-anchors onto recorded times during the walk, then a forward pass clamps every back-filled value against the times already on the record. | Route with a known 08:00 stop-0 departure: the whole event sequence comes out monotonic. |
+| 5 | The same guard changed from "is empty" to "does it parse", which would have overwritten timestamps `formatCarrierDateTime` stores verbatim (date-only, ISO). | A value that is present but unparseable is never re-anchored to and never written over. | `2026-03-14 14:30` survives a cascade untouched while the empty stops fill in. |
+| 6 | `gateOutDateTimeForShipment` placed a time-only gate out on the release date with no rollover, so `01:15` against a 22:00 release stamped ~21 hours *before* release and back-dated the route. | Rolls forward a day when the stamp lands more than 12 hours before the anchor; a modest early gate out is left alone. | `01:15` → next day; `21:40` → same day. |
+| 7 | `applyGateOutToFirstRouteStop` marked `routeStops[0]` arrived + completed unconditionally, reporting a delivery that never happened on routes whose first stop is a store. It also set arrival equal to departure (zero dwell at the shipper). | Refuses a store-first route; derives arrival from departure minus dwell. | Store-first route untouched; shipper-first gets departure and a derived arrival. |
+
+## Performance
+
+Measured in Chromium on a 121-shipment board, before vs after:
+
+| | before | after |
+|---|---|---|
+| Tracking Log render | 110 ms | 43 ms |
+| re-render with 3 rows expanded | 103 ms | 22 ms |
+| detail-panel cells carrying markup | 2057 | 51 |
+| filter options in the DOM with every panel closed | 252 | 0 |
+
+- **Detail panels render on first open, not always.** Route stops, the projected
+  schedule, the stop log and every location ping were built for every shipment on every
+  re-render and then hidden. Same change applied to History and Backhaul rows.
+- **Filter dropdowns build only the open panel.** Five Tracking Log columns and twelve
+  backhaul columns each rendered their full option list into a `display:none` panel, on
+  every keystroke and every 30-second poll.
+- **Empty-trailer assignment is indexed once per render** instead of rescanning every
+  shipment for every trailer on every row (rows × trailers × shipments). The index is
+  released in a `finally` so it can never outlive the render.
+- **Sort keys computed once per row.** The "NLT Leave By" key walks the whole route
+  through the store lookup; it was being recomputed inside the comparator.
+- **Search is debounced** by one 120 ms frame instead of rebuilding the board per keystroke.
+
+## UI and data visualization
+
+- **Delivery Trend chart** (Admin/Data) — one column per operating day, split into store
+  stops that beat their NLT and stops that missed it, with the on-time share direct-labelled
+  on top. One axis: height is the day's recorded volume, so a bad day and a light day don't
+  look alike. Hover gives the full count including stops still awaiting an arrival. Labels
+  thin automatically so a month-long range doesn't overprint.
+  - Colors are the reserved status pair, not a categorical ramp. Light steps
+    (`#3E9E6E` / `#8A2A22`) pass all six checks against the light surface. The dark skin
+    reuses the status colors the pills already use (`#31D17F` / `#FF4E5F`), which sit at
+    deutan ΔE 7.5 — inside the floor band, legal only with a second encoding — so the late
+    segment is hatched and every column carries a direct label and a legend.
+- **NLT Alerts panel is tiered.** It listed every unverified load unbounded; with 121
+  in-transit loads that pushed the entire Tracking Log below the fold. NLT Miss and At Risk
+  are the alerts and get the headline count; Unverified collapses to one line naming the
+  commonest reason, and the body is height-capped.
+- **Store Service misses get an inline bar** scaled to the worst store in range, so the
+  column ranks at a glance instead of being read numeral by numeral.
+- The commodity KPI bar used a hardcoded `#31D17F` outside the token set; it now reads
+  `--chart-ok` and is unchanged on the dark skin.
+
+## Simplification
+
+- `emptyDeliveryTally` / `tallyStoreStopAgainstNlt` — the definition of a measured store
+  stop lived inline in the commodity KPI; it is now in one place and shared with the trend.
+- `cascadeRouteStopEvents` lost a redundant special case (the departure branch was already
+  covered by the previous event in the same walk).

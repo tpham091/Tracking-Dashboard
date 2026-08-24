@@ -481,19 +481,6 @@ tr.row-past td.cell-live,tr.row-soon td.cell-live,tr.row-ready td.cell-live{back
 .commodity-kpi-meta{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s2);font-size:10.5px;color:var(--ink-soft);}
 .commodity-kpi-meta b{display:block;color:var(--ink);font-size:12px;}
 
-/* Geofence reference cell in the stop grid. Set apart from the editable Arrival/Departure
-   inputs beside it — it is telemetry, not a confirmed time entry. */
-.geo-note{font-weight:500;opacity:0.75;text-transform:none;letter-spacing:0;}
-.geo-stack{display:flex;flex-direction:column;gap:2px;}
-.geo-line{display:flex;align-items:center;gap:var(--s1);white-space:nowrap;}
-.geo-tag{
-  font-size:9.5px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;
-  color:var(--ink-soft);background:var(--grey-bg);border:1px solid var(--grey-line);
-  border-radius:var(--r-pill);padding:0 5px;min-width:26px;text-align:center;
-}
-.geo-stack .mono{font-size:11.5px;color:var(--ink-soft);}
-.geo-none{color:var(--n-400);}
-
 /* Delivery Trend chart. The SVG scales with the panel; type inside it scales with the
    viewBox, so sizes are in viewBox units rather than px. */
 .trend-chart{display:block;width:100%;height:auto;margin-top:var(--s2);overflow:visible;}
@@ -702,9 +689,6 @@ th.sortable:hover{background:#151918;color:#FFFFFF;}
 .nlt-unverified-toggle{border-top-color:rgba(255,255,255,0.08);color:#8E999A;}
 .nlt-unverified-toggle:hover{color:#F4F7F7;}
 .nlt-unverified-toggle b{color:#FFFFFF;}
-.geo-tag{color:#8E999A;background:rgba(255,255,255,0.06);border-color:rgba(255,255,255,0.12);}
-.geo-stack .mono{color:#8E999A;}
-.geo-none{color:#6E7778;}
 .stat.green{box-shadow:inset 3px 0 0 #31D17F;}
 .stat.amber{box-shadow:inset 3px 0 0 #F8BB2B;}
 .stat.red{box-shadow:inset 3px 0 0 #FF4E5F;}
@@ -2937,12 +2921,8 @@ const HEADER_MAP_LOADS_CARRIER = canonicalHeaderMap({
   'appointment time': 'appointmentTime',
   'want time': 'wantTime',
   'estimated arrival time': 'etaDate',
-  // Geofence entry/exit are auto-pickup events: the tracking platform firing when a truck
-  // crosses a boundary, not somebody confirming the stop happened. They are kept on the
-  // stop for reference but never become its Arrival/Departure actuals, because those feed
-  // the Departed time, NLT scoring and the Delivered flip. See extractLoadsCarrierImportRows.
-  'geofence entry time': 'geofenceEntry',
-  'geofence exit time': 'geofenceExit',
+  'geofence entry time': 'arrivalDate',
+  'geofence exit time': 'departureDate',
   'stop status': 'stopStatus',
   'load status': 'loadStatus',
   'terminated at': 'terminatedAt',
@@ -3447,17 +3427,12 @@ function extractLoadsCarrierImportRows(rows, headerIndex){
     const state = cleanCarrierCell(row.state);
     const cityState = city && state ? city + ', ' + state : (city || state);
     const earliestDate = formatCarrierDateTime(row.appointmentTime || row.wantTime || row.etaDate);
-    // Auto-pickup: the geofence crossing is recorded alongside the stop, never as the stop's
-    // Arrival/Departure. A truck clipping a boundary — or the platform's own auto-pickup —
-    // would otherwise land as a confirmed time entry and be scored against the NLT, drive
-    // the Departed time, and flip the load to Delivered. Only a stop status the carrier
-    // actually asserts, or a person typing in the cell, sets those.
-    const geofenceEntry = formatCarrierDateTime(row.geofenceEntry);
-    const geofenceExit = formatCarrierDateTime(row.geofenceExit);
+    const arrivalDate = formatCarrierDateTime(row.arrivalDate);
+    const departureDate = formatCarrierDateTime(row.departureDate);
     const stopType = normalizeLoadsStopType(row.stopType);
     const stopStatus = cleanCarrierCell(row.stopStatus);
 
-    if(!companyName && !cityState && !earliestDate && !geofenceEntry && !geofenceExit){
+    if(!companyName && !cityState && !earliestDate && !arrivalDate && !departureDate){
       skipped++;
       return;
     }
@@ -3466,12 +3441,10 @@ function extractLoadsCarrierImportRows(rows, headerIndex){
       companyName,
       city: cityState,
       earliestDate,
-      arrivalDate: '',
-      departureDate: '',
-      geofenceEntry,
-      geofenceExit,
-      arrived: /\b(arrived|completed|departed|delivered)\b/i.test(stopStatus),
-      completed: /\b(completed|departed|delivered)\b/i.test(stopStatus),
+      arrivalDate,
+      departureDate,
+      arrived: !!arrivalDate || /\b(arrived|completed|departed|delivered)\b/i.test(stopStatus),
+      completed: !!departureDate || /\b(completed|departed|delivered)\b/i.test(stopStatus),
       stopType,
       shipToName: cleanCarrierCell(row.shipToName),
       carrierEta: formatCarrierDateTime(row.carrierEta),
@@ -4539,10 +4512,7 @@ function mergeRouteStopData(base, next){
     completed: !!next.completed || !!base.completed,
     stopType: next.stopType || base.stopType || '',
     shipToName: next.shipToName || base.shipToName || '',
-    carrierEta: next.carrierEta || base.carrierEta || '',
-    // Carrier telemetry, so the newer report wins — unlike the actuals above.
-    geofenceEntry: next.geofenceEntry || base.geofenceEntry || '',
-    geofenceExit: next.geofenceExit || base.geofenceExit || ''
+    carrierEta: next.carrierEta || base.carrierEta || ''
   };
 }
 
@@ -4585,14 +4555,25 @@ function mergeRouteStops(existingStops, incomingStops){
   });
 }
 
+// A carrier Load Status of Delivered is an assertion that the stops happened, not a record
+// of when. It used to auto-pick-up the last stop by stamping its arrival AND departure with
+// `Terminated At` or, failing that, `Last Updated Timestamp` — the moment the report was
+// generated, identical across every row in the file — and falling back to the import time.
+// That fabricated time entry was then scored against the store's NLT and reported as a real
+// arrival, with zero dwell, for a stop nobody had timed.
+//
+// Now only the flags and the shipment state are set. Real times still come from where they
+// always did: the carrier's geofence entry/exit columns when the report carries them, and
+// the Arrival/Departure cells when somebody types one. A delivered stop with neither simply
+// has no time, and reads as unmeasured in the NLT KPI instead of measured against a
+// timestamp that was never an arrival.
+// deliveredAt is deliberately unused: it resolves to `Terminated At` or `Last Updated
+// Timestamp`, and neither is a stop time. Callers still pass it so the signature reads the
+// same at the call sites.
 function markShipmentDeliveredFromCarrierImport(shipment, deliveredAt){
-  const stops = shipment.routeStops || [];
-  const deliveredStamp = formatCarrierDateTime(deliveredAt) || formatDateTimeAsCarrierString(new Date());
-  stops.forEach((stop, index) => {
+  (shipment.routeStops || []).forEach(stop => {
     stop.arrived = true;
     stop.completed = true;
-    if(!stop.arrivalDate && index === stops.length - 1) stop.arrivalDate = deliveredStamp;
-    if(!stop.departureDate && index === stops.length - 1) stop.departureDate = deliveredStamp;
   });
   shipment.currentState = 'delivered';
   shipment.completedAt = nowISO();
@@ -5954,19 +5935,6 @@ function renderRouteStopDateTimeInput(cs, domCs, index, field, value, isHistory)
   </div>`;
 }
 
-// Geofence entry/exit as reference text, deliberately not an editable time field: these are
-// auto-pickup boundary crossings, and putting them in an input would invite them to be read
-// as the confirmed stop time they are not.
-function renderGeofenceCell(stop){
-  const entry = formatCarrierDateTime(stop && stop.geofenceEntry);
-  const exit = formatCarrierDateTime(stop && stop.geofenceExit);
-  if(!entry && !exit) return '<span class="geo-none">—</span>';
-  return `<div class="geo-stack">
-    ${entry ? `<span class="geo-line"><span class="geo-tag">In</span><span class="mono">${escapeHtml(entry)}</span></span>` : ''}
-    ${exit ? `<span class="geo-line"><span class="geo-tag">Out</span><span class="mono">${escapeHtml(exit)}</span></span>` : ''}
-  </div>`;
-}
-
 function renderRouteStopsDetails(routeStops, shipment){
   routeStops = dedupeRouteStops(routeStops || []);
   if(!routeStops || routeStops.length === 0) return '';
@@ -5975,7 +5943,7 @@ function renderRouteStopsDetails(routeStops, shipment){
   return `<div class="hist-item"><b>Carrier stop details</b></div>
     <table class="route-stop-table">
       <thead><tr>
-        <th>Company Name</th><th>Store Address</th><th>Earliest Date</th><th>NLT</th><th title="Geofence entry / exit reported by the carrier. Reference only — these are automatic boundary crossings, not confirmed stop times, so they are never scored against the NLT.">Geofence <span class="geo-note">(ref)</span></th><th>Arrival Date</th><th>Arrived</th><th>Departure Date</th><th>Completed</th>
+        <th>Company Name</th><th>Store Address</th><th>Earliest Date</th><th>NLT</th><th>Arrival Date</th><th>Arrived</th><th>Departure Date</th><th>Completed</th>
       </tr></thead>
       <tbody>
         ${routeStops.map((st, i) => `<tr>
@@ -5983,7 +5951,6 @@ function renderRouteStopsDetails(routeStops, shipment){
           <td>${escapeHtml(storeAddressLineForStop(st))||'—'}</td>
           <td>${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
           <td class="mono">${escapeHtml(nltForRouteStop(shipment, st))||'—'}</td>
-          <td>${renderGeofenceCell(st)}</td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'arrivalDate', st.arrivalDate, false)}</td>
           <td><input type="checkbox" id="stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateRouteStopField('${jsArg(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'arrived')"></td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'departureDate', st.departureDate, false)}</td>
@@ -7102,7 +7069,7 @@ function renderHistoryRouteStopsDetails(shipment){
   return `<div class="hist-item"><b>Completed carrier stop details</b></div>
     <table class="route-stop-table">
       <thead><tr>
-        <th>Company Name</th><th>Store Address</th><th>Earliest Date</th><th>NLT</th><th title="Geofence entry / exit reported by the carrier. Reference only — automatic boundary crossings, not confirmed stop times.">Geofence <span class="geo-note">(ref)</span></th><th>Arrival Date</th><th>Arrived</th><th>Departure Date</th><th>Completed</th>
+        <th>Company Name</th><th>Store Address</th><th>Earliest Date</th><th>NLT</th><th>Arrival Date</th><th>Arrived</th><th>Departure Date</th><th>Completed</th>
       </tr></thead>
       <tbody>
         ${routeStops.map((st, i) => `<tr>
@@ -7110,7 +7077,6 @@ function renderHistoryRouteStopsDetails(shipment){
           <td>${escapeHtml(storeAddressLineForStop(st))||'—'}</td>
           <td>${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
           <td class="mono">${escapeHtml(nltForRouteStop(shipment, st))||'—'}</td>
-          <td>${renderGeofenceCell(st)}</td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'arrivalDate', st.arrivalDate, true)}</td>
           <td><input type="checkbox" id="history-stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateHistoryRouteStopField('${jsArg(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'history-stopcell-${domCs}',${i},'arrived')"></td>
           <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'departureDate', st.departureDate, true)}</td>

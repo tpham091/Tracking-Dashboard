@@ -132,53 +132,46 @@ filter key), both of which name the category rather than one load's overage.
 
 ---
 
-# Auto-pickup: geofence entry/exit is no longer a time entry
+# Auto-pickup: a Delivered status no longer invents a stop time
 
-The carrier Loads export carries `Geofence Entry Time` and `Geofence Exit Time`. These are
-auto-pickup events — the tracking platform firing when a truck crosses a boundary — and the
-import was mapping them straight onto each stop's `arrivalDate` / `departureDate`. A truck
-clipping a geofence, or the platform's own auto-pickup, therefore became a confirmed stop
-time and flowed into every decision downstream of one.
+Geofence entry/exit are used as the stop's Arrival and Departure exactly as before — when
+the carrier reports an actual time, that is a real recorded event and it counts.
 
-`HEADER_MAP_LOADS_CARRIER` now maps them to `geofenceEntry` / `geofenceExit` instead, and
-`extractLoadsCarrierImportRows` builds stops with the actuals left blank.
+What did not count as one, and was being written anyway: when a load's **Load Status** came
+back Delivered, `markShipmentDeliveredFromCarrierImport` auto-picked-up the final stop by
+stamping its arrival **and** departure with `Terminated At`, or failing that
+`Last Updated Timestamp` — the moment the report was generated, which is identical across
+every row in the file — and falling back to the import time if neither parsed.
 
-## What this stops
+In the shipped `Loads_20260824095216_549737.xls` that value is `08/24/2026 03:03` on all 110
+rows, a full day before the 08/25 appointments. A store stop with no real time was therefore
+recorded as arriving at 03:03 the previous day, with zero dwell, and scored against its NLT
+on that basis.
 
-| Consumer | Before | Now |
-|---|---|---|
-| `deriveShipperDepartureTime` → `departureTime` | a geofence exit at the shipper became the load's Departed time | needs a real departure |
-| `getStatus` | that Departed time flipped the load to In Transit | stays Pending Pickup until a stop time exists |
-| `nltMissForStop` / delivery KPI | a geofence entry was scored against the store's NLT | not scored |
-| Delivered auto-flip | last stop `completed` + a geofence exit marked the load delivered | needs a real departure on that stop |
-| `cascadeRouteStopEvents` | back-filled earlier stops off a geofence anchor | anchors only on real times |
-| `arrived` / `completed` flags | set by the presence of a geofence time | set only by a stop status the carrier asserts (`Arrived`, `Completed`, `Departed`, `Delivered`) |
+A Delivered status is the carrier asserting the stops happened, not a record of when. The
+function now sets the arrived/completed flags and the shipment state, and writes no times.
 
-## What is kept
+## What still supplies a stop time
 
-The times are not discarded. They ride along on the stop and appear in the expanded stop
-grid as a **Geofence (ref)** column — muted IN / OUT chips, deliberately plain text rather
-than a time input, so they read as telemetry beside the editable Arrival and Departure
-cells rather than as a competing entry. `mergeRouteStopData` carries them through the
-save/load round trip, newest-report-wins, since unlike the actuals they are the carrier's
-to revise.
+| Source | Counts? |
+|---|---|
+| Geofence Entry / Exit with an actual value | **Yes** — unchanged |
+| Somebody typing in the Arrival / Departure cell | **Yes** — unchanged |
+| Gate Out Time on an outbound import | **Yes**, into a blank first stop, unchanged |
+| The back-fill cascade behind the stop checkboxes | **Yes**, into blanks, unchanged |
+| A Load Status of Delivered, with no time anywhere | **No** — this is the change |
 
-## Scope
-
-Only the shipment (store) Loads import changed. `HEADER_MAP_BACKHAUL_LOADS` still maps
-geofence entry/exit onto backhaul stop arrival/departure — the Backhaul Log is a separate
-record with its own late calculation, and it was not part of this request.
+A delivered stop with no recorded time now simply has none. It shows as a store stop in the
+delivery KPI but not a measured one, instead of being measured against a timestamp that was
+never an arrival.
 
 ### Verified
 
-Against the real `Loads_20260824095216_549737.xls` column layout, with geofence times and a
-stop status injected onto two stops of load CS10191934:
+Against the real report's column layout, load CS10191934 with `Load Status = Delivered` on
+both stops, geofence times on the shipper stop and none on the store stop:
 
-- Geofence times land in `geofenceEntry` / `geofenceExit`; `arrivalDate` and `departureDate`
-  stay empty.
-- `arrived` / `completed` follow the Stop Status only — `Completed` ticks both, `Not
-  Tracking` ticks neither. Previously the second stop's geofence entry alone set `arrived`.
-- `deriveShipperDepartureTime` returns nothing, so the load stays `pending_pickup` rather
-  than being flipped to In Transit by a boundary crossing.
-- `nltMissForStop` scores neither stop.
-- The values survive `dedupeRouteStops` → `mergeRouteStopData` unchanged.
+- The shipper stop keeps its real geofence values as Arrival `08/25/2026 09:05` and
+  Departure `08/25/2026 09:48`, and `deriveShipperDepartureTime` returns `09:48`.
+- The store stop is flagged arrived and completed with no arrival or departure, where it
+  would previously have been stamped `08/24/2026 03:03`.
+- Neither stop is scored against an NLT off a fabricated time.

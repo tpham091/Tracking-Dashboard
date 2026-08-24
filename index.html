@@ -481,6 +481,11 @@ tr.row-past td.cell-live,tr.row-soon td.cell-live,tr.row-ready td.cell-live{back
 .commodity-kpi-meta{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s2);font-size:10.5px;color:var(--ink-soft);}
 .commodity-kpi-meta b{display:block;color:var(--ink);font-size:12px;}
 
+/* A preview row that will not be applied — still readable, clearly not going in. */
+.row-skipped > td{opacity:0.45;}
+.inline-check{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-soft);cursor:pointer;margin-right:auto;}
+.inline-check input{width:15px;height:15px;}
+
 /* Delivery Trend chart. The SVG scales with the panel; type inside it scales with the
    viewBox, so sizes are in viewBox units rather than px. */
 .trend-chart{display:block;width:100%;height:auto;margin-top:var(--s2);overflow:visible;}
@@ -501,6 +506,38 @@ tr.row-past td.cell-live,tr.row-soon td.cell-live,tr.row-ready td.cell-live{back
 .chart-legend .swatch-late{background:var(--chart-late);
   background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.55) 0 2px,transparent 2px 4px);}
 .chart-legend .swatch-missing{background:var(--chart-missing);}
+.chart-legend .swatch-north{background:var(--blue);}
+.chart-legend .swatch-west{background:var(--chart-ok);}
+.chart-legend .swatch-east{background:var(--amber);}
+.chart-legend .swatch-review{background:var(--chart-missing);}
+
+/* "206 WEST - 6" — a day's lanes as a row of chips, which is how the count gets read out.
+   Direction carries the color, the warehouse carries the identity, and the count is
+   mono/tabular so a column of them can be scanned. */
+.lane-day{display:flex;align-items:flex-start;gap:var(--s3);padding:var(--s2) 0;border-top:1px solid var(--border);}
+.lane-day:first-of-type{border-top:none;}
+.lane-date{
+  flex:0 0 92px;font-family:var(--f-display);font-weight:700;font-size:14px;
+  text-transform:uppercase;letter-spacing:0.4px;color:var(--ink-soft);padding-top:3px;
+}
+.lane-chips{display:flex;flex-wrap:wrap;gap:var(--s2);flex:1;min-width:0;}
+.lane-chip{
+  display:inline-flex;align-items:center;gap:var(--s2);
+  border:1px solid var(--grey-line);background:var(--grey-bg);
+  border-radius:var(--r-sm);padding:3px var(--s2);white-space:nowrap;
+}
+.lane-label{font-family:var(--f-mono);font-size:11.5px;font-weight:600;letter-spacing:0.2px;}
+.lane-count{
+  font-family:var(--f-mono);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;
+  padding-left:var(--s2);border-left:1px solid var(--grey-line);
+}
+.lane-chip.dir-north{border-color:var(--blue-line);background:var(--blue-bg);color:var(--blue);}
+.lane-chip.dir-north .lane-count{border-left-color:var(--blue-line);}
+.lane-chip.dir-west{border-color:var(--green-line);background:var(--green-bg);color:var(--green);}
+.lane-chip.dir-west .lane-count{border-left-color:var(--green-line);}
+.lane-chip.dir-east{border-color:var(--amber-line);background:var(--amber-bg);color:var(--amber);}
+.lane-chip.dir-east .lane-count{border-left-color:var(--amber-line);}
+.lane-chip.dir-review{border-style:dashed;color:var(--ink-soft);}
 .trend-hatch-line{stroke:var(--n-0);opacity:0.5;}
 
 /* Magnitude inside a table cell: the miss count is easier to rank down a column as a
@@ -689,6 +726,18 @@ th.sortable:hover{background:#151918;color:#FFFFFF;}
 .nlt-unverified-toggle{border-top-color:rgba(255,255,255,0.08);color:#8E999A;}
 .nlt-unverified-toggle:hover{color:#F4F7F7;}
 .nlt-unverified-toggle b{color:#FFFFFF;}
+.lane-day{border-top-color:rgba(255,255,255,0.07);}
+.lane-date{color:#8E999A;}
+.lane-chip{background:#1D2322;border-color:rgba(255,255,255,0.09);color:#F4F7F7;}
+.lane-count{border-left-color:rgba(255,255,255,0.12);}
+.lane-chip.dir-north{background:rgba(57,191,242,.11);border-color:rgba(57,191,242,.32);color:#39BFF2;}
+.lane-chip.dir-west{background:rgba(49,209,127,.11);border-color:rgba(49,209,127,.32);color:#31D17F;}
+.lane-chip.dir-east{background:rgba(248,187,43,.11);border-color:rgba(248,187,43,.32);color:#F8BB2B;}
+.lane-chip.dir-review{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.16);color:#A7B0B0;}
+.chart-legend .swatch-north{background:#39BFF2;}
+.chart-legend .swatch-west{background:#31D17F;}
+.chart-legend .swatch-east{background:#F8BB2B;}
+.chart-legend .swatch-review{background:#8E999A;}
 .stat.green{box-shadow:inset 3px 0 0 #31D17F;}
 .stat.amber{box-shadow:inset 3px 0 0 #F8BB2B;}
 .stat.red{box-shadow:inset 3px 0 0 #FF4E5F;}
@@ -879,7 +928,11 @@ th.sortable:hover{background:#151918;color:#FFFFFF;}
           <table id="bulkPreviewTable"></table>
         </div>
         <div class="submit-row">
-          <span class="hint">Rows with an existing CS# update that shipment; new CS#s are created.</span>
+          <label class="inline-check" title="An Outbound List export covers every site and every day. With this on you can drop the whole file in and only the CS#s already on the Tracking Log are touched — no manual filtering first.">
+            <input type="checkbox" id="bulkOutboundMatchOnly" checked onchange="renderBulkPreviewTable()">
+            <span>Outbound: only update CS#s already on the Tracking Log</span>
+          </label>
+          <span class="hint" id="bulkImportHint">Daily Store Changes rows always create or update. Outbound rows update only.</span>
           <button class="btn-ghost" type="button" onclick="clearBulkPreview()">Clear Preview</button>
           <button class="btn-primary" id="btn-bulk-import" onclick="importBulk()">Import Parsed Rows</button>
         </div>
@@ -2647,10 +2700,13 @@ function previewBulk(){
   const mapped = mapRows(raw, HEADER_MAP, DEFAULT_INDEX_MAP);
   const result = buildShipmentRowsFromReport(mapped.mappedRows, mapped.usedHeader ? mapped.fields : []);
   parsedBulkRows = result.rows;
+  parsedBulkRows.forEach(r => { r.inTrackingLog = !!shipments[r.csNumber]; });
   let skipped = result.skipped;
 
+  const unmatchedOutbound = parsedBulkRows.filter(r => r.sourceType === 'outbound' && !r.inTrackingLog).length;
   const warnBox = document.getElementById('bulkWarnings');
-  warnBox.innerHTML = skipped > 0 ? `<div class="warn-box">${skipped} row(s) skipped — no Shipment ID found.</div>` : '';
+  warnBox.innerHTML = (skipped > 0 ? `<div class="warn-box">${skipped} row(s) skipped — no Shipment ID found.</div>` : '')
+    + (unmatchedOutbound > 0 ? `<div class="warn-box">${unmatchedOutbound} outbound row(s) are for CS#s not on the Tracking Log. They are listed below as <b>Not in log</b> and are skipped unless you untick the match-only box.</div>` : '');
 
   const table = document.getElementById('bulkPreviewTable');
   if(parsedBulkRows.length === 0){
@@ -2822,17 +2878,47 @@ function removeBulkPreviewRow(index){
   renderBulkPreviewTable();
 }
 
+// Whether a parsed row will actually be applied. An Outbound List export is the whole
+// site's book for the day, so by default only rows whose CS# is already on the Tracking Log
+// count — the alternative is 500 shipments created from one drop, or filtering the export by
+// hand first.
+function bulkOutboundMatchOnly(){
+  const box = document.getElementById('bulkOutboundMatchOnly');
+  return !box || box.checked;
+}
+
+function bulkRowWillImport(r){
+  if(r.sourceType !== 'outbound') return true;
+  return r.inTrackingLog || !bulkOutboundMatchOnly();
+}
+
 function renderBulkPreviewTable(){
   const table = document.getElementById('bulkPreviewTable');
-  table.innerHTML = `<thead><tr><th>CS#</th><th>Commodity/Shipper</th><th>Stops</th><th>Pick Up Start</th><th>Trailer#</th><th>Consignee</th><th>State</th><th>Confirmed Ready Location</th><th></th></tr></thead><tbody>` +
-    parsedBulkRows.map((r, i) => `<tr>
-      <td class="mono">${escapeHtml(r.csNumber)}</td><td>${escapeHtml(r.commodityShipper)||'—'}</td><td>${escapeHtml(r.stops)||'—'}</td>
+  const willImport = parsedBulkRows.filter(bulkRowWillImport).length;
+  table.innerHTML = `<thead><tr><th>CS#</th><th>Match</th><th>Commodity/Shipper</th><th>Stops</th><th>Pick Up Start</th><th>Trailer#</th><th>Consignee</th><th>State</th><th>Confirmed Ready Location</th><th></th></tr></thead><tbody>` +
+    parsedBulkRows.map((r, i) => {
+      const applies = bulkRowWillImport(r);
+      const match = r.sourceType !== 'outbound'
+        ? `<span class="status-pill grey">Daily</span>`
+        : (r.inTrackingLog ? `<span class="status-pill green">In log</span>` : `<span class="status-pill amber">Not in log</span>`);
+      return `<tr class="${applies ? '' : 'row-skipped'}">
+      <td class="mono">${escapeHtml(r.csNumber)}</td><td>${match}</td><td>${escapeHtml(r.commodityShipper)||'—'}</td><td>${escapeHtml(r.stops)||'—'}</td>
       <td class="mono">${escapeHtml(r.scheduleRelease)||'—'}</td><td class="mono">${escapeHtml(r.trailerNumber)||'—'}</td>
       <td>${escapeHtml(r.consignee)||'—'}</td><td>${escapeHtml(r.currentState)||'—'}</td>
       <td>${escapeHtml(r.confirmedLocation)||'—'}</td>
       <td><button class="del-btn" onclick="removeBulkPreviewRow(${i})" title="Remove row">&times;</button></td>
-    </tr>`).join('') + `</tbody>`;
-  document.getElementById('btn-bulk-import').textContent = `Import ${parsedBulkRows.length} Parsed Row${parsedBulkRows.length===1?'':'s'}`;
+    </tr>`;
+    }).join('') + `</tbody>`;
+  const btn = document.getElementById('btn-bulk-import');
+  btn.textContent = `Import ${willImport} Row${willImport===1?'':'s'}`;
+  btn.disabled = willImport === 0;
+  const hint = document.getElementById('bulkImportHint');
+  if(hint){
+    const skippedCount = parsedBulkRows.length - willImport;
+    hint.textContent = skippedCount > 0
+      ? `${skippedCount} of ${parsedBulkRows.length} parsed rows will be skipped — not on the Tracking Log.`
+      : 'Daily Store Changes rows always create or update. Outbound rows update only.';
+  }
 }
 
 function clearBulkPreview(opts){
@@ -3027,6 +3113,17 @@ function mdyFromDateInput(value){
 function todayDatePart(){
   const d = new Date();
   return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0') + '/' + d.getFullYear();
+}
+
+// Combines the date picker and the masked time input into the carrier datetime string the
+// record stores. An empty time clears the value; a missing date falls back to what the row
+// already knows, then to the planned date, then to today.
+function combineStopDateTime(currentValue, dateValue, timeValue, fallbackDates){
+  const time = normalizeTime(timeValue);
+  if(!time) return '';
+  const fallback = (fallbackDates || []).map(datePartOf).find(Boolean);
+  const datePart = mdyFromDateInput(dateValue) || datePartOf(currentValue) || fallback || todayDatePart();
+  return formatCarrierDateTime(datePart + ' ' + time);
 }
 
 function updateRouteStopDateTime(cs, index, field, dateValue, timeValue){
@@ -4827,11 +4924,20 @@ async function importBulk(){
   const btn = document.getElementById('btn-bulk-import');
   btn.disabled = true; btn.textContent = 'Importing...';
   await loadHistory();
+  await loadShipments(); // the match test below is only as good as the state it reads
   let skippedHistory = 0;
+  let skippedUnmatched = 0;
   for(const r of parsedBulkRows){
     const cs = r.csNumber;
     if(shipmentExistsInHistory(cs)){
       skippedHistory++;
+      continue;
+    }
+    // Re-checked against freshly loaded state rather than trusting the preview's flag, which
+    // was computed whenever the file was dropped.
+    r.inTrackingLog = !!shipments[cs];
+    if(!bulkRowWillImport(r)){
+      skippedUnmatched++;
       continue;
     }
     const existing = shipments[cs] || { csNumber: cs, updates: [], stopLog: {}, createdAt: nowISO() };
@@ -4880,8 +4986,10 @@ async function importBulk(){
     shipments[cs] = existing;
     await saveShipmentRemote(existing);
   }
-  const importedCount = parsedBulkRows.length - skippedHistory;
-  showToast(`Imported ${importedCount} shipment(s)${skippedHistory ? ` - skipped ${skippedHistory} already in History` : ''}`);
+  const importedCount = parsedBulkRows.length - skippedHistory - skippedUnmatched;
+  showToast(`Imported ${importedCount} shipment(s)`
+    + (skippedHistory ? ` - skipped ${skippedHistory} already in History` : '')
+    + (skippedUnmatched ? ` - skipped ${skippedUnmatched} not on the Tracking Log` : ''));
   document.getElementById('bulkPaste').value = '';
   document.getElementById('bulkFile').value = '';
   document.getElementById('bulkFileName').textContent = 'No file selected';
@@ -5936,17 +6044,43 @@ function nltForRouteStop(shipment, stop){
   return NLT_STATUS_LABEL[info.status] || '';
 }
 
-function renderRouteStopDateTimeInput(cs, domCs, index, field, value, isHistory){
-  const cellPrefix = isHistory ? `history-stopcell-${domCs}` : `stopcell-${domCs}`;
-  const datePrefix = isHistory ? `history-stopdate-${domCs}` : `stopdate-${domCs}`;
-  const navKey = isHistory ? `history-stopcell-${domCs}` : domCs;
-  const timeId = `${cellPrefix}-${index}-${field}`;
-  const dateId = `${datePrefix}-${index}-${field}`;
-  const updateFn = isHistory ? 'updateHistoryRouteStopDateTime' : 'updateRouteStopDateTime';
+// Four stop grids now share one set of editable cells: the Tracking Log, History, the
+// Backhaul Log and Backhaul History. They differ only in which id namespace they own and
+// which handlers commit an edit, so that is all a context carries.
+const STOP_GRID_CONTEXTS = {
+  log: { cell:'stopcell', date:'stopdate',
+    dateTimeFn:'updateRouteStopDateTime', fieldFn:'updateRouteStopField' },
+  history: { cell:'history-stopcell', date:'history-stopdate',
+    dateTimeFn:'updateHistoryRouteStopDateTime', fieldFn:'updateHistoryRouteStopField' },
+  backhaul: { cell:'bh-stopcell', date:'bh-stopdate',
+    dateTimeFn:'updateBackhaulStopDateTime', fieldFn:'updateBackhaulStopField' },
+  backhaulHistory: { cell:'bhh-stopcell', date:'bhh-stopdate',
+    dateTimeFn:'updateBackhaulHistoryStopDateTime', fieldFn:'updateBackhaulHistoryStopField' }
+};
+
+function stopGridIdPrefix(ctx, domId){ return `${ctx.cell}-${domId}`; }
+
+function renderRouteStopDateTimeInput(ctx, recordId, domId, index, field, value){
+  const timeId = `${stopGridIdPrefix(ctx, domId)}-${index}-${field}`;
+  const dateId = `${ctx.date}-${domId}-${index}-${field}`;
+  const navPrefix = stopGridIdPrefix(ctx, domId);
+  const commit = `${ctx.dateTimeFn}('${jsArg(recordId)}', ${index}, '${field}',`;
   return `<div class="stop-datetime">
-    <input type="date" class="inline-edit stop-date" id="${dateId}" value="${escapeAttr(carrierDateInputFromDateTime(value))}" onchange="${updateFn}('${jsArg(cs)}', ${index}, '${field}', this.value, document.getElementById('${timeId}').value)">
-    <input type="text" inputmode="numeric" maxlength="5" class="inline-edit time-mask" id="${timeId}" value="${escapeAttr(carrierTimeFromDateTime(value))}" placeholder="HH:MM" onfocus="prepareTimeMask(this)" oninput="handleTimeMaskInput(this)" onchange="finishTimeMask(this);${updateFn}('${jsArg(cs)}', ${index}, '${field}', document.getElementById('${dateId}').value, this.value)" onblur="finishTimeMask(this);${updateFn}('${jsArg(cs)}', ${index}, '${field}', document.getElementById('${dateId}').value, this.value)" onkeydown="handleTimeMaskKeydown(event);handleStopGridNav(event,'${navKey}',${index},'${field}')">
+    <input type="date" class="inline-edit stop-date" id="${dateId}" value="${escapeAttr(carrierDateInputFromDateTime(value))}" onchange="${commit} this.value, document.getElementById('${timeId}').value)">
+    <input type="text" inputmode="numeric" maxlength="5" class="inline-edit time-mask" id="${timeId}" value="${escapeAttr(carrierTimeFromDateTime(value))}" placeholder="HH:MM" onfocus="prepareTimeMask(this)" oninput="handleTimeMaskInput(this)" onchange="finishTimeMask(this);${commit} document.getElementById('${dateId}').value, this.value)" onblur="finishTimeMask(this);${commit} document.getElementById('${dateId}').value, this.value)" onkeydown="handleTimeMaskKeydown(event);handleStopGridNav(event,'${navPrefix}',${index},'${field}')">
   </div>`;
+}
+
+// The editable half of a stop row — arrival, Arrived, departure, Completed — identical in
+// every grid. Only the identity columns to its left differ, so each grid builds those and
+// calls this for the part people actually interact with.
+function stopGridTimeCells(ctx, recordId, domId, index, stop){
+  const idPrefix = stopGridIdPrefix(ctx, domId);
+  const box = (field, checked) => `<td><input type="checkbox" id="${idPrefix}-${index}-${field}" ${checked ? 'checked' : ''} onchange="${ctx.fieldFn}('${jsArg(recordId)}', ${index}, '${field}', this.checked)" onkeydown="handleStopGridNav(event,'${idPrefix}',${index},'${field}')"></td>`;
+  return `<td>${renderRouteStopDateTimeInput(ctx, recordId, domId, index, 'arrivalDate', stop.arrivalDate)}</td>
+    ${box('arrived', stop.arrived)}
+    <td>${renderRouteStopDateTimeInput(ctx, recordId, domId, index, 'departureDate', stop.departureDate)}</td>
+    ${box('completed', stop.completed)}`;
 }
 
 function renderRouteStopsDetails(routeStops, shipment){
@@ -5965,10 +6099,7 @@ function renderRouteStopsDetails(routeStops, shipment){
           <td>${escapeHtml(storeAddressLineForStop(st))||'—'}</td>
           <td>${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
           <td class="mono">${escapeHtml(nltForRouteStop(shipment, st))||'—'}</td>
-          <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'arrivalDate', st.arrivalDate, false)}</td>
-          <td><input type="checkbox" id="stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateRouteStopField('${jsArg(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'arrived')"></td>
-          <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'departureDate', st.departureDate, false)}</td>
-          <td><input type="checkbox" id="stopcell-${domCs}-${i}-completed" ${st.completed ? 'checked' : ''} onchange="updateRouteStopField('${jsArg(cs)}', ${i}, 'completed', this.checked)" onkeydown="handleStopGridNav(event,'${domCs}',${i},'completed')"></td>
+          ${stopGridTimeCells(STOP_GRID_CONTEXTS.log, cs, domCs, i, st)}
         </tr>`).join('')}
       </tbody>
     </table>`;
@@ -6073,14 +6204,14 @@ function handleTimeMaskInput(input){
 // column in the previous/next row instead of the browser default (incrementing a
 // time segment, or doing nothing on a checkbox), matching how a grid like Excel
 // or TMW's own stop grid behaves.
-function handleStopGridNav(event, domCs, index, colName){
+// idPrefix is the id stem every cell in one grid shares, e.g. "stopcell-CS1001". It used
+// to be inferred from whether the value started with "history-stopcell-", which only worked
+// for the two grids that existed.
+function handleStopGridNav(event, idPrefix, index, colName){
   if(event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
   event.preventDefault();
   const targetIndex = event.key === 'ArrowUp' ? index - 1 : index + 1;
-  const targetId = String(domCs || '').startsWith('history-stopcell-')
-    ? `${domCs}-${targetIndex}-${colName}`
-    : `stopcell-${domCs}-${targetIndex}-${colName}`;
-  const target = document.getElementById(targetId);
+  const target = document.getElementById(`${idPrefix}-${targetIndex}-${colName}`);
   if(target) target.focus();
 }
 
@@ -7091,10 +7222,7 @@ function renderHistoryRouteStopsDetails(shipment){
           <td>${escapeHtml(storeAddressLineForStop(st))||'—'}</td>
           <td>${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
           <td class="mono">${escapeHtml(nltForRouteStop(shipment, st))||'—'}</td>
-          <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'arrivalDate', st.arrivalDate, true)}</td>
-          <td><input type="checkbox" id="history-stopcell-${domCs}-${i}-arrived" ${st.arrived ? 'checked' : ''} onchange="updateHistoryRouteStopField('${jsArg(cs)}', ${i}, 'arrived', this.checked)" onkeydown="handleStopGridNav(event,'history-stopcell-${domCs}',${i},'arrived')"></td>
-          <td>${renderRouteStopDateTimeInput(cs, domCs, i, 'departureDate', st.departureDate, true)}</td>
-          <td><input type="checkbox" id="history-stopcell-${domCs}-${i}-completed" ${st.completed ? 'checked' : ''} onchange="updateHistoryRouteStopField('${jsArg(cs)}', ${i}, 'completed', this.checked)" onkeydown="handleStopGridNav(event,'history-stopcell-${domCs}',${i},'completed')"></td>
+          ${stopGridTimeCells(STOP_GRID_CONTEXTS.history, cs, domCs, i, st)}
         </tr>`).join('')}
       </tbody>
     </table>`;
@@ -7265,7 +7393,9 @@ const HEADER_MAP_BACKHAUL_LOADS = canonicalHeaderMap({
   'last updated timestamp': 'lastUpdatedAt',
   'picked up timestamp': 'pickedUpTimestamp',
   'latest check call': 'latestCheckCall',
-  'latest check call time': 'latestCheckCallTime'
+  'latest check call time': 'latestCheckCallTime',
+  'carrier eta': 'carrierEta',
+  'estimated arrival time': 'carrierEta'
 });
 
 let parsedBackhaulImportRows = [];
@@ -7293,6 +7423,14 @@ function backhaulToDbRecord(record){
     deliveryDeparture: record.deliveryDeparture || '',
     pickupStopStatus: record.pickupStopStatus || '',
     deliveryStopStatus: record.deliveryStopStatus || '',
+    // Explicit checkbox state. Legacy records have none, so they seed once from whether a
+    // time was recorded; after that the stored value wins, which is what lets someone
+    // untick a stop that still has a time on it.
+    pickupArrived: record.pickupArrived === undefined ? !!record.pickupArrival : !!record.pickupArrived,
+    pickupCompleted: record.pickupCompleted === undefined ? !!record.pickupDeparture : !!record.pickupCompleted,
+    deliveryArrived: record.deliveryArrived === undefined ? !!record.deliveryArrival : !!record.deliveryArrived,
+    deliveryCompleted: record.deliveryCompleted === undefined ? !!record.deliveryDeparture : !!record.deliveryCompleted,
+    carrierEta: record.carrierEta || '',
     truckNumber: record.truckNumber || '',
     trailerNumber: record.trailerNumber || '',
     tracking: record.tracking || '',
@@ -7409,6 +7547,42 @@ function latestBackhaulDateTime(a, b){
   return latestCarrierDateTime(a, b);
 }
 
+// Which flat fields make up each of a backhaul's two stops. The record is not a routeStops
+// array like a shipment, so this table is what lets the shared stop grid address it by index.
+// Fields a person can edit on the Backhaul Log. A re-import fills them when blank but never
+// overwrites what is already there.
+const BACKHAUL_PROTECTED_ON_REIMPORT = [
+  'pickupArrival','pickupDeparture','deliveryArrival','deliveryDeparture',
+  'pickupArrived','pickupCompleted','deliveryArrived','deliveryCompleted',
+  'truckNumber','trailerNumber'
+];
+
+const BACKHAUL_STOPS = [
+  { type:'Pickup', appointment:'pickupAppointment', arrivalDate:'pickupArrival', departureDate:'pickupDeparture',
+    arrived:'pickupArrived', completed:'pickupCompleted', status:'pickupStopStatus' },
+  { type:'Delivery', appointment:'deliveryAppointment', arrivalDate:'deliveryArrival', departureDate:'deliveryDeparture',
+    arrived:'deliveryArrived', completed:'deliveryCompleted', status:'deliveryStopStatus' }
+];
+
+// The two stops presented in the same shape a shipment route stop has, so one grid renders both.
+function backhaulStopViews(b){
+  if(!b) return [];
+  return BACKHAUL_STOPS.map((def, i) => ({
+    type: def.type,
+    companyName: i === 0 ? backhaulPickupLabel(b) : backhaulDeliveryLabel(b),
+    facility: (i === 0 ? b.originFacility : b.destinationFacility) || '',
+    city: i === 0 ? cityStateLabel(b.originCity, b.originState) : cityStateLabel(b.destinationCity, b.destinationState),
+    earliestDate: b[def.appointment] || '',
+    arrivalDate: b[def.arrivalDate] || '',
+    departureDate: b[def.departureDate] || '',
+    // Same seeding rule backhaulToDbRecord applies, repeated here so a record that has not
+    // been through the db round trip (a freshly parsed import row) still shows correctly.
+    arrived: b[def.arrived] === undefined ? !!b[def.arrivalDate] : !!b[def.arrived],
+    completed: b[def.completed] === undefined ? !!b[def.departureDate] : !!b[def.completed],
+    stopStatus: b[def.status] || ''
+  }));
+}
+
 function mergeBackhaulRecord(existing, incoming){
   existing = existing || {};
   incoming = incoming || {};
@@ -7419,6 +7593,12 @@ function mergeBackhaulRecord(existing, incoming){
     const val = incoming[k];
     if(k === 'status' && existing.statusSource === 'WEST' && !incomingIsWest) return;
     if(k === 'equipmentType' && existing.equipmentSource === 'WEST' && !incomingIsWest) return;
+    // Stop actuals and their checkboxes are editable on the log now, so a re-import must not
+    // replace them — same rule the Tracking Log follows. The importer still fills blanks.
+    if(BACKHAUL_PROTECTED_ON_REIMPORT.includes(k)){
+      const held = existing[k];
+      if(held !== undefined && held !== null && String(held).trim() !== '' && held !== false) return;
+    }
     if(val !== undefined && val !== null && String(val).trim() !== '') out[k] = val;
   });
   if(incoming.status && incomingIsWest) out.statusSource = 'WEST';
@@ -7493,6 +7673,7 @@ function extractBackhaulLoadsRows(raw){
     if(row.trailerNumber) item.trailerNumber = cleanCarrierCell(row.trailerNumber);
     item.latestCheckCallTime = latestBackhaulDateTime(item.latestCheckCallTime, row.latestCheckCallTime);
     if(row.latestCheckCall) item.latestCheckCall = cleanCarrierCell(row.latestCheckCall);
+    item.carrierEta = latestBackhaulDateTime(item.carrierEta, row.carrierEta);
     if(TERMINAL_STATES.includes(String(normalizedStatus || '').toLowerCase())){
       item.completedAt = latestBackhaulDateTime(item.completedAt, row.terminatedAt || row.lastUpdatedAt);
     }
@@ -7755,7 +7936,7 @@ function toggleBackhaulDetails(loadNumber){
     const body = document.getElementById('backhaul-detailbody-' + domLoad);
     if(body && !body.innerHTML.trim()){
       const record = backhauls[loadNumber] || historyBackhaulByLoad(loadNumber);
-      if(record) body.innerHTML = renderBackhaulDetails(record);
+      if(record) body.innerHTML = renderBackhaulDetails(record, !backhauls[loadNumber]);
     }
   }
   row.style.display = opening ? 'table-row' : 'none';
@@ -7765,57 +7946,118 @@ function toggleBackhaulDetails(loadNumber){
   if(btn) btn.innerHTML = opening ? '&minus;' : '+';
 }
 
-function backhaulStopDetailRows(b){
-  const pickupCity = cityStateLabel(b.originCity, b.originState);
-  const deliveryCity = cityStateLabel(b.destinationCity, b.destinationState);
-  const rows = [
-    {
-      type: 'Pickup',
-      name: backhaulPickupLabel(b),
-      facility: b.originFacility,
-      city: pickupCity,
-      appointment: b.pickupAppointment,
-      arrival: b.pickupArrival,
-      departure: b.pickupDeparture,
-      status: b.pickupDeparture ? 'Completed' : (b.pickupArrival ? 'Arrived' : 'Open')
-    },
-    {
-      type: 'Delivery',
-      name: backhaulDeliveryLabel(b),
-      facility: b.destinationFacility,
-      city: deliveryCity,
-      appointment: b.deliveryAppointment,
-      arrival: b.deliveryArrival,
-      departure: b.deliveryDeparture,
-      status: b.deliveryDeparture || b.deliveryArrival ? 'Completed' : 'Open'
-    }
-  ];
-  return rows.map(r => `<tr>
-    <td>${escapeHtml(r.type)}</td>
-    <td>${escapeHtml(r.name)||'—'}</td>
-    <td class="mono">${escapeHtml(r.facility)||'—'}</td>
-    <td>${escapeHtml(r.city)||'—'}</td>
-    <td class="mono">${escapeHtml(r.appointment)||'—'}</td>
-    <td class="mono">${escapeHtml(r.arrival)||'—'}</td>
-    <td class="mono">${escapeHtml(r.departure)||'—'}</td>
-    <td><span class="status-pill ${backhaulStatusPillClass(r.status)}">${escapeHtml(r.status)}</span></td>
-  </tr>`).join('');
+// The backhaul expand panel uses the same grid as the Tracking Log — editable arrival and
+// departure date+time, Arrived and Completed checkboxes, keyboard nav between rows — minus
+// the NLT column, which is a store-delivery concept and does not apply to a backhaul.
+function renderBackhaulStopGrid(b, isHistory){
+  const ctx = STOP_GRID_CONTEXTS[isHistory ? 'backhaulHistory' : 'backhaul'];
+  const loadNumber = b.loadNumber || '';
+  const domLoad = domKey(loadNumber);
+  const stops = backhaulStopViews(b);
+  return `<div class="hist-item"><b>Backhaul stop details</b></div>
+    <table class="route-stop-table">
+      <thead><tr>
+        <th>Stop Type</th><th>Name</th><th>Facility</th><th>City</th><th>Appointment</th>
+        <th>Arrival Date</th><th>Arrived</th><th>Departure Date</th><th>Completed</th>
+      </tr></thead>
+      <tbody>
+        ${stops.map((st, i) => `<tr>
+          <td>${escapeHtml(st.type)}</td>
+          <td>${escapeHtml(st.companyName)||'—'}</td>
+          <td class="mono">${escapeHtml(st.facility)||'—'}</td>
+          <td>${escapeHtml(st.city)||'—'}</td>
+          <td class="mono">${escapeHtml(formatCarrierDateTime(st.earliestDate))||'—'}</td>
+          ${stopGridTimeCells(ctx, loadNumber, domLoad, i, st)}
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
 }
 
-function renderBackhaulDetails(b){
+function renderBackhaulDetails(b, isHistory){
   const late = backhaulLateInfo(b);
+  const eta = formatCarrierDateTime(b.carrierEta);
   return `
-    <div class="hist-item"><b>Backhaul stop details</b></div>
-    <table class="route-stop-table">
-      <thead><tr><th>Stop Type</th><th>Name</th><th>Facility</th><th>City</th><th>Appointment</th><th>Arrival</th><th>Departure</th><th>Status</th></tr></thead>
-      <tbody>${backhaulStopDetailRows(b)}</tbody>
-    </table>
+    ${renderBackhaulStopGrid(b, isHistory)}
     <div class="hist-item" style="margin-top:8px;">
       <b>Load info</b> — PO Numbers ${escapeHtml(b.purchaseOrders)||'—'} — Equipment ${escapeHtml(b.equipmentType)||'—'} — Truck ${escapeHtml(b.truckNumber)||'—'} — Trailer ${escapeHtml(b.trailerNumber)||'—'} — Tracking ${escapeHtml(b.tracking)||'—'} — Tender ${escapeHtml(b.tenderStatus)||'—'}
     </div>
-    ${b.latestCheckCall || b.latestCheckCallTime ? `<div class="hist-item"><b>Latest check call</b> — ${escapeHtml(b.latestCheckCall)||'—'}${b.latestCheckCallTime ? ` — ${escapeHtml(b.latestCheckCallTime)}` : ''}</div>` : ''}
+    ${eta ? `<div class="hist-item"><b>Carrier ETA</b> — <span class="mono">${escapeHtml(eta)}</span></div>` : ''}
+    ${b.latestCheckCall || b.latestCheckCallTime ? `<div class="hist-item"><b>Latest check call</b> — ${escapeHtml(b.latestCheckCall)||'—'}${b.latestCheckCallTime ? ` — <span class="mono">${escapeHtml(b.latestCheckCallTime)}</span>` : ''}</div>` : ''}
     ${late.late ? `<div class="hist-item"><b>Late status</b> — <span class="status-pill bh-late">${escapeHtml(late.label)}</span><span class="late-delta">${escapeHtml(formatDurationMinutes(late.minutes))}</span></div>` : ''}
   `;
+}
+
+// ---------- BACKHAUL INLINE EDITING ----------
+// Mirrors the Tracking Log: blur commits, a re-render-driven blur is ignored, and the record
+// is written whole through the same path the importers use.
+
+function backhaulRecordFor(loadNumber, isHistory){
+  return isHistory ? historyBackhaulByLoad(loadNumber) : (backhauls[loadNumber] || null);
+}
+
+async function saveBackhaulRecord(record, isHistory){
+  if(!apiConfigured() || !record || !record.loadNumber) return;
+  record.updatedAt = nowISO();
+  const path = (isHistory ? 'backhaulHistory/' : 'backhauls/') + sanitizeKey(record.loadNumber);
+  try{
+    await db.ref(path).set(backhaulToDbRecord(record));
+  }catch(e){
+    showToast('Could not save backhaul ' + record.loadNumber, true);
+  }
+}
+
+async function rerenderBackhaul(isHistory){
+  if(isHistory) await renderBackhaulHistory();
+  else await renderBackhaulLog();
+}
+
+async function updateBackhaulTextField(loadNumber, field, value, isHistory){
+  if(suppressInlineCommit) return; // blur fired by a re-render, not by a person
+  const record = backhaulRecordFor(loadNumber, isHistory);
+  if(!record) return;
+  const next = caps(String(value || '').trim());
+  if(String(record[field] || '') === next) return;
+  record[field] = next;
+  await saveBackhaulRecord(record, isHistory);
+  showToast(`Updated ${field === 'truckNumber' ? 'truck' : 'trailer'} for ${loadNumber}`);
+  await rerenderBackhaul(isHistory);
+}
+
+async function updateBackhaulStopDateTime(loadNumber, index, field, dateValue, timeValue, isHistory){
+  if(suppressInlineCommit) return;
+  const def = BACKHAUL_STOPS[index];
+  const record = backhaulRecordFor(loadNumber, isHistory);
+  if(!def || !record) return;
+  const current = record[def[field]] || '';
+  const next = combineStopDateTime(current, dateValue, timeValue, [record[def.appointment]]);
+  if(current === next) return;
+  record[def[field]] = next;
+  // Recording a time ticks its own box, the same way the Tracking Log's grid behaves.
+  if(next && field === 'arrivalDate') record[def.arrived] = true;
+  if(next && field === 'departureDate'){ record[def.completed] = true; record[def.arrived] = true; }
+  await saveBackhaulRecord(record, isHistory);
+  await rerenderBackhaul(isHistory);
+}
+
+async function updateBackhaulStopField(loadNumber, index, field, value, isHistory){
+  if(suppressInlineCommit) return;
+  const def = BACKHAUL_STOPS[index];
+  const record = backhaulRecordFor(loadNumber, isHistory);
+  if(!def || !record) return;
+  const next = !!value;
+  if(!!record[def[field]] === next) return;
+  record[def[field]] = next;
+  if(field === 'completed' && next) record[def.arrived] = true;
+  if(field === 'arrived' && !next) record[def.completed] = false;
+  await saveBackhaulRecord(record, isHistory);
+  await rerenderBackhaul(isHistory);
+}
+
+function updateBackhaulHistoryStopDateTime(loadNumber, index, field, dateValue, timeValue){
+  return updateBackhaulStopDateTime(loadNumber, index, field, dateValue, timeValue, true);
+}
+function updateBackhaulHistoryStopField(loadNumber, index, field, value){
+  return updateBackhaulStopField(loadNumber, index, field, value, true);
 }
 
 function backhaulLateInfo(b){
@@ -8072,11 +8314,11 @@ function backhaulTableHtml(rows, isHistory){
       <td>${escapeHtml(backhaulDeliveryLabel(b))||'—'}</td>
       <td class="mono">${escapeHtml(b.deliveryAppointment)||'—'}</td>
       <td class="mono">${escapeHtml(b.deliveryArrival || b.deliveryDeparture)||'—'}</td>
-      <td class="mono">${escapeHtml(b.truckNumber)||'—'}</td>
-      <td class="mono">${escapeHtml(b.trailerNumber)||'—'}</td>
+      <td class="mono"><input type="text" id="bh-trk-${domLoad}" class="inline-edit mono" value="${escapeAttr(b.truckNumber||'')}" placeholder="Truck#" onblur="updateBackhaulTextField('${jsArg(b.loadNumber)}', 'truckNumber', this.value, ${isHistory})" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
+      <td class="mono"><input type="text" id="bh-trl-${domLoad}" class="inline-edit mono" value="${escapeAttr(b.trailerNumber||'')}" placeholder="Trailer#" onblur="updateBackhaulTextField('${jsArg(b.loadNumber)}', 'trailerNumber', this.value, ${isHistory})" onkeydown="if(event.key==='Enter'){this.blur();}"></td>
       <td>${late.late ? `<span class="status-pill bh-late">${escapeHtml(late.label)}</span><span class="late-delta">${escapeHtml(formatDurationMinutes(late.minutes))}</span>` : '<span class="status-pill bh-complete">OK</span>'}</td>
     </tr>
-    <tr class="hist-row" id="backhaul-detail-${domLoad}" style="display:${expanded ? 'table-row' : 'none'};"><td colspan="${detailColspan}" id="backhaul-detailbody-${domLoad}">${expanded ? renderBackhaulDetails(b) : ''}</td></tr>`;
+    <tr class="hist-row" id="backhaul-detail-${domLoad}" style="display:${expanded ? 'table-row' : 'none'};"><td colspan="${detailColspan}" id="backhaul-detailbody-${domLoad}">${expanded ? renderBackhaulDetails(b, isHistory) : ''}</td></tr>`;
   }).join('') + `</tbody></table>`;
 }
 
@@ -8086,7 +8328,12 @@ async function renderBackhaulLog(){
   if(!content) return;
   renderBackhaulFilterBar(false);
   const rows = backhaulRowsFiltered(Object.values(backhauls), 'backhaulSearch', false);
-  content.innerHTML = backhaulTableHtml(rows, false);
+  suppressInlineCommit = true;
+  try{
+    content.innerHTML = backhaulTableHtml(rows, false);
+  } finally {
+    suppressInlineCommit = false;
+  }
   syncSelectedBackhaulDeleteButton();
 }
 
@@ -8096,7 +8343,12 @@ async function renderBackhaulHistory(){
   if(!content) return;
   renderBackhaulFilterBar(true);
   const rows = backhaulRowsFiltered(backhaulHistory, 'backhaulHistorySearch', true);
-  content.innerHTML = backhaulTableHtml(rows, true);
+  suppressInlineCommit = true;
+  try{
+    content.innerHTML = backhaulTableHtml(rows, true);
+  } finally {
+    suppressInlineCommit = false;
+  }
   syncSelectedBackhaulHistoryDeleteButton();
 }
 
@@ -8532,6 +8784,147 @@ function dailyDeliveryTrendRows(startStr, endStr){
   return Object.keys(byDate).sort().map(date => byDate[date]);
 }
 
+// ---------- DIRECTION OF LOAD ----------
+// Where a load ran, relative to the warehouse it left. Origins and the West list come
+// straight from operations; the rest is decided by Texas ZIP3 geography, which is what the
+// store records actually carry (city text is free-form and misspelled, ZIP is not).
+//
+// The rules are deliberately literal, and anything they do not cover is flagged rather than
+// guessed at, so a wrong lane never quietly lands in a count.
+
+const DIRECTION_ORIGINS = {
+  // San Antonio warehouses
+  '227': { city:'SAN ANTONIO', lat: 29.42 }, '206': { city:'SAN ANTONIO', lat: 29.42 },
+  '507': { city:'SAN ANTONIO', lat: 29.42 }, '203': { city:'SAN ANTONIO', lat: 29.42 },
+  '205': { city:'SAN ANTONIO', lat: 29.42 },
+  // Temple warehouses
+  '403': { city:'TEMPLE', lat: 31.10 }, '405': { city:'TEMPLE', lat: 31.10 },
+  '407': { city:'TEMPLE', lat: 31.10 },
+  // San Marcos
+  '404': { city:'SAN MARCOS', lat: 29.88 }
+};
+
+// The six West Texas destinations called out by operations.
+const DIRECTION_WEST_CITIES = ['SAN ANGELO','ABILENE','ODESSA','MIDLAND','BIG SPRING','LUBBOCK'];
+// ...and the ZIP3s those cities own, so a misspelled or abbreviated city still lands right.
+const DIRECTION_WEST_ZIP3 = ['769','790','791','792','793','794','795','796','797','798','799'];
+// Houston metro plus the Beaumont/Port Arthur corner east of it.
+const DIRECTION_EAST_ZIP3 = ['770','771','772','773','774','775','776','777'];
+
+// Approximate centroid latitude per Texas ZIP3, used only to answer "is this north of the
+// warehouse it came from". Coarse on purpose — a few miles either way never changes the
+// answer for a lane that is hundreds of miles long.
+const ZIP3_LATITUDE = {
+  '750':33.05,'751':32.25,'752':32.78,'753':32.78,'754':33.29,'755':33.20,'756':32.15,
+  '757':32.35,'758':31.32,'759':31.34,'760':32.55,'761':32.75,'762':33.03,'763':33.60,
+  '764':32.22,'765':31.10,'766':31.30,'767':31.55,'768':32.45,'769':31.46,
+  '770':29.76,'771':29.76,'772':29.76,'773':30.20,'774':29.75,'775':29.45,'776':30.05,
+  '777':30.08,'778':30.60,'779':28.80,
+  '780':27.51,'781':29.42,'782':29.42,'783':27.80,'784':27.80,'785':26.05,
+  '786':30.20,'787':30.27,'788':29.20,'789':29.85,
+  '790':35.20,'791':34.20,'792':34.40,'793':33.58,'794':33.58,'795':32.45,'796':32.45,
+  '797':31.95,'798':31.45,'799':31.76
+};
+
+function zip3Of(value){
+  const z = String(value || '').trim().slice(0, 3);
+  return /^\d{3}$/.test(z) ? z : '';
+}
+
+// The delivery this load is named for: the last store stop after the shipper.
+function directionDestinationStop(shipment){
+  const stops = storeStopsAfterShipperFromRouteStops((shipment && shipment.routeStops) || []);
+  return stops.length ? stops[stops.length - 1] : null;
+}
+
+function directionDestinationInfo(shipment){
+  const stop = directionDestinationStop(shipment);
+  const store = stop ? storeLookupForStop(stop) : null;
+  const city = String((store && store.city) || (stop && stop.city) || '').toUpperCase().replace(/,.*$/, '').trim();
+  return { city, zip3: zip3Of(store && store.zip), name: (stop && stop.companyName) || '' };
+}
+
+// Returns { key, label, reason } — key is 'NORTH' | 'WEST' | 'EAST' | 'REVIEW'.
+function loadDirection(shipment){
+  const warehouse = extractWarehouseNumber(shipment);
+  const origin = DIRECTION_ORIGINS[warehouse];
+  const dest = directionDestinationInfo(shipment);
+  if(!dest.city && !dest.zip3) return { key:'REVIEW', label:'Review', reason:'No delivery stop to place' };
+  if(DIRECTION_WEST_CITIES.includes(dest.city) || DIRECTION_WEST_ZIP3.includes(dest.zip3)){
+    return { key:'WEST', label:'West', reason:dest.city || dest.zip3 };
+  }
+  if(DIRECTION_EAST_ZIP3.includes(dest.zip3)){
+    return { key:'EAST', label:'East', reason:'Houston area' };
+  }
+  if(!origin) return { key:'REVIEW', label:'Review', reason:`Warehouse ${warehouse || '?'} has no origin city` };
+  const destLat = ZIP3_LATITUDE[dest.zip3];
+  if(destLat === undefined) return { key:'REVIEW', label:'Review', reason:`${dest.city || 'Destination'} not placed` };
+  if(destLat > origin.lat) return { key:'NORTH', label:'North', reason:`North of ${origin.city}` };
+  return { key:'REVIEW', label:'Review', reason:`${dest.city || dest.zip3} is south of ${origin.city}` };
+}
+
+// "206 WEST - 6" — the day's load count per warehouse and direction, which is how the board
+// is talked about out loud. Anything the rules could not place lands in its own bucket with
+// the reason attached rather than being folded into a direction.
+function dailyLoadCountRows(startStr, endStr){
+  const range = inclusiveDateRange(startStr || todayStr(), endStr || startStr || todayStr());
+  const byDate = new Map();
+  Object.values(shipments).concat(historyList || []).forEach(s => {
+    const date = shipmentServiceDate(s);
+    if(!isoDateInRange(date, range.start, range.exclusiveEnd)) return;
+    const warehouse = extractWarehouseNumber(s) || '???';
+    const dir = loadDirection(s);
+    if(!byDate.has(date)) byDate.set(date, new Map());
+    const groups = byDate.get(date);
+    const key = warehouse + '|' + dir.key;
+    if(!groups.has(key)){
+      groups.set(key, { warehouse, direction: dir.key, label: `${warehouse} ${dir.key}`, count: 0, reasons: new Map(), shipments: [] });
+    }
+    const g = groups.get(key);
+    g.count++;
+    g.shipments.push(s.csNumber);
+    if(dir.key === 'REVIEW') g.reasons.set(dir.reason, (g.reasons.get(dir.reason) || 0) + 1);
+  });
+  const DIRECTION_ORDER = { NORTH:0, WEST:1, EAST:2, REVIEW:3 };
+  return Array.from(byDate.keys()).sort().map(date => ({
+    date,
+    groups: Array.from(byDate.get(date).values()).sort((a, b) =>
+      (DIRECTION_ORDER[a.direction] - DIRECTION_ORDER[b.direction]) ||
+      String(a.warehouse).localeCompare(String(b.warehouse), undefined, {numeric:true}))
+  }));
+}
+
+function renderDailyLoadCount(days){
+  if(!days.length){
+    return `<section class="kpi-panel">
+      <div class="kpi-panel-head"><div><h3>Loads by Commodity &amp; Direction</h3>
+        <div class="hint">No loads in this range.</div></div></div></section>`;
+  }
+  const reviewTotal = days.reduce((n, d) => n + d.groups.filter(g => g.direction === 'REVIEW').reduce((m, g) => m + g.count, 0), 0);
+  return `<section class="kpi-panel">
+    <div class="kpi-panel-head">
+      <div>
+        <h3>Loads by Commodity &amp; Direction</h3>
+        <div class="hint">Counted on the Pick Up Start operating day, by the warehouse the load left and where its last store stop sits relative to that warehouse.${reviewTotal ? ` <b>${reviewTotal}</b> could not be placed and are listed as Review.` : ''}</div>
+      </div>
+      <div class="chart-legend">
+        <span><i class="swatch swatch-north"></i>North</span>
+        <span><i class="swatch swatch-west"></i>West</span>
+        <span><i class="swatch swatch-east"></i>East</span>
+        <span><i class="swatch swatch-review"></i>Review</span>
+      </div>
+    </div>
+    ${days.map(d => `<div class="lane-day">
+      <div class="lane-date">${escapeHtml(new Date(d.date + 'T12:00:00').toLocaleDateString(undefined, {weekday:'short', month:'numeric', day:'numeric'}))}</div>
+      <div class="lane-chips">
+        ${d.groups.map(g => `<span class="lane-chip dir-${g.direction.toLowerCase()}" title="${escapeAttr(g.direction === 'REVIEW' ? Array.from(g.reasons.entries()).map(([r, n]) => `${r} (${n})`).join(' · ') : g.shipments.slice(0, 12).join(', '))}">
+          <span class="lane-label">${escapeHtml(g.label)}</span><span class="lane-count">${g.count}</span>
+        </span>`).join('')}
+      </div>
+    </div>`).join('')}
+  </section>`;
+}
+
 function dailyOnTimeDeliveryKpiRows(startStr, endStr){
   const range = inclusiveDateRange(startStr || todayStr(), endStr || startStr || todayStr());
   const rows = Object.values(shipments).concat(historyList || []);
@@ -8831,6 +9224,7 @@ async function renderAdminData(){
         </div>
       </section>
     </div>
+    ${renderDailyLoadCount(dailyLoadCountRows(adminKpiStartDate, adminKpiEndDate))}
     ${renderDeliveryTrendChart(dailyDeliveryTrendRows(adminKpiStartDate, adminKpiEndDate))}
     ${dailyTotalStoreStops === 0
       ? `<div class="empty-state" style="margin-bottom:16px;"><b>No store stops for ${escapeHtml(rangeLabel)}.</b><br>KPI totals only count store delivery stops, not shippers or warehouses.</div>`

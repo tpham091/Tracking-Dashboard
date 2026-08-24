@@ -233,3 +233,87 @@ The earlier fix to `markShipmentDeliveredFromCarrierImport` — a Delivered load
 the report's own generation timestamp as the final stop's arrival and departure — was a
 different bug found on the way here, and it stands on its own. It is unrelated to the
 `Auto-pickup` text handled above.
+
+
+---
+
+# Backhaul editing, load direction, and outbound match-only
+
+## Backhaul Log: Truck # and Trailer # are editable
+
+Both cells are now inline inputs on the Backhaul Log and Backhaul History, committing on
+blur exactly like the Tracking Log's. A re-import fills them when blank but no longer
+overwrites what someone typed.
+
+## The backhaul expand panel is the Tracking Log's stop grid
+
+Four grids now share one set of editable cells — Tracking Log, History, Backhaul Log,
+Backhaul History — so a backhaul stop gets the same arrival and departure date+time inputs,
+the same Arrived and Completed checkboxes, and the same up/down keyboard nav between rows.
+No NLT column: that is a store-delivery deadline and does not apply to a backhaul.
+
+A backhaul is stored flat (pickup* / delivery* fields) rather than as a `routeStops` array,
+so `BACKHAUL_STOPS` maps the two stops onto those fields by index and `backhaulStopViews`
+presents them in the shape a route stop has. Checkbox state is now persisted per stop
+(`pickupArrived`, `pickupCompleted`, `deliveryArrived`, `deliveryCompleted`); legacy records
+seed once from whether a time was recorded, after which the stored value wins — which is
+what lets a stop be unticked while a time is still on it.
+
+The panel also shows the carrier ETA, which the backhaul Loads import now reads.
+
+Supporting cleanups: `handleStopGridNav` took the id namespace by sniffing whether the value
+started with `history-stopcell-`, which only worked for the two grids that existed; it now
+takes the prefix directly. `combineStopDateTime` is shared instead of being inlined per grid.
+
+## Loads by Commodity & Direction
+
+New Admin/Data panel reading `227 NORTH  15`, `206 WEST  6` — the day's load count per
+warehouse and direction, grouped by operating day.
+
+Direction is decided against the warehouse the load left:
+
+| | Rule |
+|---|---|
+| Origins | San Antonio (227/206/507/203/205), Temple (403/405/407), San Marcos (404) |
+| **West** | San Angelo, Abilene, Odessa, Midland, Big Spring, Lubbock |
+| **East** | Houston area |
+| **North** | destination north of the origin warehouse's city |
+| **Review** | everything else, with the reason attached |
+
+Classification runs off ZIP3 rather than city text, because that is what the store records
+carry and free-text city names are inconsistent. `ZIP3_LATITUDE` holds a coarse centroid
+latitude per Texas ZIP3, used only to answer "is this north of the origin" — a few miles
+either way never changes the answer for a lane hundreds of miles long.
+
+Nothing is guessed. South Texas (Laredo, Corpus Christi, Brownsville), an unrecognised
+warehouse, and a destination that cannot be placed all land in **Review** with the reason on
+the chip's tooltip, rather than being folded into a direction.
+
+### Verified
+
+Against real STORE_LOOKUP rows: all six West cities classify West from any warehouse;
+Houston, Katy and Pearland classify East; Austin/Waco/Dallas/Kyle are North of San Antonio,
+Round Rock North of San Marcos, Fort Worth North of Temple; Laredo, Corpus Christi and
+Brownsville are flagged as south of San Antonio; an unknown warehouse is flagged as having
+no origin city.
+
+## Outbound List: only touch CS#s already on the Tracking Log
+
+An Outbound List export is the whole site's book — the shipped sample is 544 rows across
+every site and day — and the importer created a shipment for every CS# it did not recognise.
+That meant filtering the export by hand before every import.
+
+Outbound rows now update existing shipments only. The preview marks each row **In log** /
+**Not in log** / **Daily**, greys out what will be skipped, and the button counts what will
+actually be applied. A checkbox (on by default) turns the restriction off for the rare case
+where outbound should create shipments. Daily Store Changes rows are unaffected — that is
+the report that establishes the day's list, and it still creates and updates.
+
+The match is re-tested against freshly loaded state at import time, not the flag computed
+when the file was dropped.
+
+### Verified
+
+The real `Outbound_List__37.xlsx`: 542 rows parse, 2 skipped for no Shipment ID. With 12 of
+those CS#s on the Tracking Log, the preview marks 12 In log and 530 Not in log, greys 530
+rows, and the button reads **Import 12 Rows**. Unticking the box returns **Import 542 Rows**.

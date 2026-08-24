@@ -3359,6 +3359,20 @@ function extractCooltraxAssetRows(rows, headerIndex){
   return { rows: out, skipped };
 }
 
+// The Loads export writes the literal text "Auto-pickup" / "Auto-delivery" into the geofence
+// columns when the tracking platform inferred the stop instead of recording a real boundary
+// crossing. formatCarrierDateTime passes text it doesn't recognise through verbatim, so those
+// words were being stored as a stop's arrival/departure: the stop read as having a time, the
+// grid cell rendered blank because the value won't parse, and the back-fill cascade then
+// refused to fill it because something was already there.
+//
+// An inferred stop is not a time entry. An actual geofence timestamp is a real recorded event
+// and is used exactly as before.
+function geofenceDateTime(value){
+  const formatted = formatCarrierDateTime(cleanCarrierCell(value));
+  return formatted && parseCarrierDateTime(formatted) ? formatted : '';
+}
+
 function normalizeLoadsStopType(value){
   const text = cleanCarrierCell(value).toLowerCase().replace(/\s+/g, ' ');
   if(/pick\s*up|pickup|shipper/.test(text)) return 'pickup';
@@ -3427,8 +3441,8 @@ function extractLoadsCarrierImportRows(rows, headerIndex){
     const state = cleanCarrierCell(row.state);
     const cityState = city && state ? city + ', ' + state : (city || state);
     const earliestDate = formatCarrierDateTime(row.appointmentTime || row.wantTime || row.etaDate);
-    const arrivalDate = formatCarrierDateTime(row.arrivalDate);
-    const departureDate = formatCarrierDateTime(row.departureDate);
+    const arrivalDate = geofenceDateTime(row.arrivalDate);
+    const departureDate = geofenceDateTime(row.departureDate);
     const stopType = normalizeLoadsStopType(row.stopType);
     const stopStatus = cleanCarrierCell(row.stopStatus);
 
@@ -7495,8 +7509,11 @@ function extractBackhaulLoadsRows(raw){
       item.originState = state;
       if(row.stopStatus) item.pickupStopStatus = cleanCarrierCell(row.stopStatus);
       item.pickupAppointment = formatCarrierDateTime(row.appointmentTime) || item.pickupAppointment || '';
-      item.pickupArrival = formatCarrierDateTime(row.arrivalDate) || item.pickupArrival || '';
-      item.pickupDeparture = formatCarrierDateTime(row.departureDate || row.pickedUpTimestamp) || item.pickupDeparture || '';
+      item.pickupArrival = geofenceDateTime(row.arrivalDate) || item.pickupArrival || '';
+      // Picked Up Timestamp is dropped as a fallback: when the geofence reads "Auto-pickup"
+      // that column carries the platform's inferred pickup time, which is the same auto
+      // stamp under another name.
+      item.pickupDeparture = geofenceDateTime(row.departureDate) || item.pickupDeparture || '';
     } else if(stopType === 'delivery'){
       item.destinationName = stopName;
       item.destinationFacility = facility || item.destinationFacility || '';
@@ -7504,8 +7521,8 @@ function extractBackhaulLoadsRows(raw){
       item.destinationState = state;
       if(row.stopStatus) item.deliveryStopStatus = cleanCarrierCell(row.stopStatus);
       item.deliveryAppointment = formatCarrierDateTime(row.appointmentTime) || item.deliveryAppointment || '';
-      item.deliveryArrival = formatCarrierDateTime(row.arrivalDate) || item.deliveryArrival || '';
-      item.deliveryDeparture = formatCarrierDateTime(row.departureDate) || item.deliveryDeparture || '';
+      item.deliveryArrival = geofenceDateTime(row.arrivalDate) || item.deliveryArrival || '';
+      item.deliveryDeparture = geofenceDateTime(row.departureDate) || item.deliveryDeparture || '';
     }
   });
   return { rows: Array.from(byLoad.values()), skipped };

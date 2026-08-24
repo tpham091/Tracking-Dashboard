@@ -175,3 +175,61 @@ both stops, geofence times on the shipper stop and none on the store stop:
 - The store stop is flagged arrived and completed with no arrival or departure, where it
   would previously have been stamped `08/24/2026 03:03`.
 - Neither stop is scored against an NLT off a fabricated time.
+
+
+---
+
+# "Auto-pickup" is a word, not a time
+
+The Loads export does not leave the geofence columns blank when the platform infers a stop.
+It writes the literal text **`Auto-pickup`** or **`Auto-delivery`** into `Geofence Entry Time`
+and `Geofence Exit Time`.
+
+`formatCarrierDateTime` passes text it doesn't recognise through verbatim — deliberately, so a
+carrier value is never silently destroyed — so those words were stored as the stop's arrival
+and departure. Downstream, a non-empty string is a time:
+
+- `arrived: !!arrivalDate` flagged the stop arrived off the word.
+- The stop grid's date and time inputs rendered blank, because the value won't parse — so the
+  record held `Auto-pickup` while the cell looked empty.
+- The back-fill cascade then refused to fill that stop, because the guard is "is something
+  already recorded here" and something was.
+- On the Backhaul Log, the **Pickup Actual** column displayed the word `Auto-pickup` where a
+  timestamp belongs.
+
+`geofenceDateTime()` now gates both geofence columns: a value that parses as a datetime is
+used exactly as before, and anything else is treated as no reading. Applied to both
+`extractLoadsCarrierImportRows` (shipments) and `extractBackhaulLoadsRows` (backhauls).
+
+The backhaul pickup also had `formatCarrierDateTime(row.departureDate || row.pickedUpTimestamp)`.
+That fallback is dropped: when the geofence reads `Auto-pickup`, `Picked Up Timestamp` carries
+the platform's inferred pickup time — the same auto stamp under another name. Where the geofence
+is real, the two columns agree anyway (36 of 46 pickup rows in the sample export are identical;
+the other 10 are exactly the `Auto-pickup` rows).
+
+## Measured on the shipped export
+
+`Loads_20260824094854_666281.xls`, 125 stop rows across 48 loads, every load Delivered:
+
+| | before | after |
+|---|---|---|
+| Backhaul time fields holding `Auto-pickup` / `Auto-delivery` | 22 (across 11 loads) | 0 |
+| Shipment stop time fields holding them | 28 | 0 |
+| Backhaul loads with a pickup departure | 46 | 36 |
+| Shipment stops carrying a time | 119 | 105 |
+| Shipment stops flagged arrived | 125 | 124 |
+
+The arrived count barely moves because `Stop Status` still counts: `Completed` is the carrier
+asserting the stop happened, and that assertion is kept. The one stop that loses the flag had
+`Stop Status = Delayed`, which asserts nothing, and was previously flagged arrived purely
+because the word `Auto-pickup` was sitting in its arrival field.
+
+Load CS10190639 is the whole change in one row — Pickup Actual goes from `Auto-pickup` to `—`,
+while its real Delivery Actual `08/24/2026 04:00` and its On Time status are untouched.
+
+## Note on the previous commit
+
+The earlier fix to `markShipmentDeliveredFromCarrierImport` — a Delivered load status stamping
+the report's own generation timestamp as the final stop's arrival and departure — was a
+different bug found on the way here, and it stands on its own. It is unrelated to the
+`Auto-pickup` text handled above.

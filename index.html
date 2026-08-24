@@ -2625,6 +2625,19 @@ function markDepartedIfActive(shipment){
   shipment.currentState = 'Departed';
 }
 
+// Automatic pickup stamping — gate out on an outbound import, the shipper-departure
+// derivation behind the stop checkboxes, and the carrier import — fills a blank Departed
+// time but never replaces one that is already on the record. A time a dispatcher typed,
+// or one an earlier report established, is the one the board keeps. Only the Departed
+// field's own editor (updateDepartureTime) replaces an existing value, because that is a
+// person deliberately correcting it.
+function stampDepartureTimeIfBlank(record, value){
+  if(!record || !value) return false;
+  if(String(record.departureTime || '').trim()) return false;
+  record.departureTime = value;
+  return true;
+}
+
 let parsedBulkRows = [];
 
 function previewBulk(){
@@ -4190,7 +4203,14 @@ async function applyCloseoutRows(){
     // Routed through the same field-update path a manual checkbox click uses, so the
     // existing cascade (auto-check + back-fill earlier stops) and Delivered auto-flip
     // logic does the actual work here instead of duplicating it.
-    await updateRouteStopField(r.csNumber, lastIndex, 'departureDate', r.completionDate);
+    //
+    // The completion date only fills a blank. updateRouteStopField writes whatever it is
+    // handed — correct when a person is typing into the cell, but here it is an import
+    // speaking, and it must not replace a departure somebody already recorded for the
+    // stop. Ticking Arrived/Completed below still runs either way.
+    if(!String(existing.routeStops[lastIndex].departureDate || '').trim()){
+      await updateRouteStopField(r.csNumber, lastIndex, 'departureDate', r.completionDate);
+    }
     await updateRouteStopField(r.csNumber, lastIndex, 'arrived', true);
     await updateRouteStopField(r.csNumber, lastIndex, 'completed', true);
     closed++;
@@ -4482,8 +4502,12 @@ function mergeRouteStopData(base, next){
     companyName: next.companyName || base.companyName || '',
     city: next.city || base.city || '',
     earliestDate: next.earliestDate || base.earliestDate || '',
-    arrivalDate: next.arrivalDate || base.arrivalDate || '',
-    departureDate: next.departureDate || base.departureDate || '',
+    // Actual times already on the record win over an incoming report. A re-import used to
+    // replace an arrival or departure a dispatcher had typed (or one an earlier report had
+    // established) with whatever the newer file said. Planned fields below still take the
+    // newer value — those are the carrier's to revise; the actuals are not.
+    arrivalDate: base.arrivalDate || next.arrivalDate || '',
+    departureDate: base.departureDate || next.departureDate || '',
     arrived: !!next.arrived || !!base.arrived,
     completed: !!next.completed || !!base.completed,
     stopType: next.stopType || base.stopType || '',
@@ -4691,8 +4715,8 @@ async function importCarrierRows(){
       if(derivedConsignee) existing.consignee = derivedConsignee;
       const shipperDeparture = deriveShipperDepartureTime(existing.routeStops);
       if(shipperDeparture){
-        existing.departureTime = shipperDeparture;
-        markDepartedIfActive(existing);
+        stampDepartureTimeIfBlank(existing, shipperDeparture);
+        markDepartedIfActive(existing); // the state still flips; only the time is protected
       }
     }
     if(r.cooltraxAssetLocation){
@@ -4816,11 +4840,14 @@ async function importBulk(){
     if(r.sourceType === 'outbound' && (isDepartedCurrentState(r.currentState) || r.gateOutTime)){
       const gateDeparture = gateOutDepartureTime(r.gateOutTime);
       if(gateDeparture){
-        existing.departureTime = gateDeparture;
+        stampDepartureTimeIfBlank(existing, gateDeparture);
         markDepartedIfActive(existing);
         applyGateOutToFirstRouteStop(existing, r.gateOutTime);
+        // Lateness is judged against the time actually on the record, which may be one
+        // that was already there rather than the gate out we just declined to write.
+        const departed = existing.departureTime;
         const releaseTime = releaseTimeForShipment(existing);
-        if(releaseTime && gateDeparture <= releaseTime) existing.lateDepartureReason = '';
+        if(departed && releaseTime && departed <= releaseTime) existing.lateDepartureReason = '';
       }
     }
     stampCompletion(existing, previousState);
@@ -5001,27 +5028,51 @@ function minutesAgo(iso){
   return Math.round((Date.now() - new Date(iso).getTime()) / 60000);
 }
 
+// The moment a load was scheduled to leave — Pick Up Start date and time combined.
+// getStatus decides "past scheduled" from this and the status pill reports the overage
+// from it, so the two can never disagree about when the deadline was.
+function scheduledDepartureDateTime(s){
+  const releaseTime = releaseTimeForShipment(s);
+  const releaseDate = releaseDateForShipment(s);
+  if(!releaseTime || !releaseDate) return null;
+  const [h,m] = String(releaseTime).split(':').map(Number);
+  const [yr,mo,da] = String(releaseDate).split('-').map(Number);
+  if(isNaN(h) || isNaN(m) || isNaN(yr)) return null;
+  const rel = new Date(yr, (mo||1)-1, da||1, h, m, 0);
+  return isNaN(rel.getTime()) ? null : rel;
+}
+
+// Minutes elapsed since the scheduled departure, or null if it hasn't passed (or there
+// is no schedule to measure against).
+function minutesPastScheduledDeparture(s){
+  const rel = scheduledDepartureDateTime(s);
+  if(!rel) return null;
+  const mins = Math.floor((Date.now() - rel.getTime()) / 60000);
+  return mins > 0 ? mins : null;
+}
+
 function getStatus(s){
   // A load is in transit once any trusted departure time exists: manual Tracking Log
   // departure, outbound Gate Out Time, or carrier route-stop departure.
   if(effectiveDepartureTime(s)) return 'in_transit';
-
-  const releaseTime = releaseTimeForShipment(s);
-  const releaseDate = releaseDateForShipment(s);
-  if(releaseTime && releaseDate){
-    const [h,m] = releaseTime.split(':').map(Number);
-    if(!isNaN(h) && !isNaN(m)){
-      const [yr,mo,da] = releaseDate.split('-').map(Number);
-      const rel = new Date(yr, (mo||1)-1, da||1, h, m, 0);
-      if(Date.now() > rel.getTime()) return 'past_scheduled';
-    }
-  }
+  const rel = scheduledDepartureDateTime(s);
+  if(rel && Date.now() > rel.getTime()) return 'past_scheduled';
   return 'pending_pickup';
 }
-function statusMeta(status){
+
+function statusMeta(status, shipment){
+  if(status === 'past_scheduled'){
+    // How far past the scheduled departure the load actually is, not just that it is.
+    // "Past Scheduled Pickup" read identically at one minute over and at six hours over,
+    // which is the difference between "it's fine" and "chase it now".
+    const over = minutesPastScheduledDeparture(shipment);
+    return {
+      label: over === null ? 'Past Scheduled' : 'Past ' + formatDurationMinutes(over),
+      cls: 'red'
+    };
+  }
   return {
     in_transit: {label:'In Transit', cls:'green'},
-    past_scheduled: {label:'Past Scheduled Pickup', cls:'red'},
     pending_pickup: {label:'Pending Pickup', cls:'amber'}
   }[status];
 }
@@ -5819,11 +5870,12 @@ async function updateRouteStopField(cs, index, field, value){
 
   const shipperDeparture = deriveShipperDepartureTime(s.routeStops);
   if(shipperDeparture){
-    s.departureTime = shipperDeparture;
+    stampDepartureTimeIfBlank(s, shipperDeparture);
     markDepartedIfActive(s);
   }
+  const departed = s.departureTime;
   const releaseTime = releaseTimeForShipment(s);
-  if(shipperDeparture && releaseTime && shipperDeparture <= releaseTime){
+  if(departed && releaseTime && departed <= releaseTime){
     s.lateDepartureReason = '';
   }
   // Once the final stop is checked Completed and has a departure time filled in,
@@ -7091,7 +7143,7 @@ async function updateHistoryRouteStopField(cs, index, field, value){
     cascadeRouteStopEvents(h.routeStops, index, field, anchor);
   }
   const shipperDeparture = deriveShipperDepartureTime(h.routeStops);
-  if(shipperDeparture) h.departureTime = shipperDeparture;
+  stampDepartureTimeIfBlank(h, shipperDeparture);
   if(h.currentState && !TERMINAL_STATES.includes(String(h.currentState).toLowerCase())) h.currentState = 'Delivered';
   if(!h.completedAt) h.completedAt = nowISO();
   await saveHistoryRecord(h);

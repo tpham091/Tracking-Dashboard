@@ -66,3 +66,65 @@ Measured in Chromium on a 121-shipment board, before vs after:
   stop lived inline in the commodity KPI; it is now in one place and shared with the trend.
 - `cascadeRouteStopEvents` lost a redundant special case (the departure branch was already
   covered by the previous event in the same walk).
+
+---
+
+# Follow-up: automatic pickup stamping, and elapsed time on the status pill
+
+## Automatic stamping never overwrites a time
+
+The rule now: **an automatic path fills a blank time; only a person replaces one that is
+already there.** Six paths wrote times without checking whether something was already
+recorded, so a stop checkbox, a re-import, or a close-out file could silently replace a
+departure a dispatcher had typed.
+
+| Path | Was | Now |
+|---|---|---|
+| Stop checkbox → `deriveShipperDepartureTime` (`updateRouteStopField`) | overwrote `departureTime` | fills it only if blank |
+| Same, in History (`updateHistoryRouteStopField`) | overwrote `departureTime` | fills it only if blank |
+| Outbound import gate out (`importBulk`) | overwrote `departureTime` | fills it only if blank |
+| Carrier import shipper departure (`importCarrierRows`) | overwrote `departureTime` | fills it only if blank |
+| Carrier re-import stop merge (`mergeRouteStopData`) | incoming report replaced `arrivalDate` / `departureDate` | existing value wins; incoming fills blanks |
+| Close-out import (`applyCloseoutRows`) | wrote the completion date over the last stop's `departureDate` | fills it only if blank |
+
+Deliberately unchanged:
+
+- **`updateDepartureTime`** — the Departed field's own editor. That is a person correcting
+  the value on purpose, so it still replaces, and still clears when emptied.
+- **The Departed *state* still flips.** `markDepartedIfActive` runs whether or not the time
+  was taken; only the timestamp is protected.
+- **Arrived / Completed flags still OR together** on re-import, so a checkbox ticked by hand
+  and one set by a report both survive.
+- **Planned fields** (`earliestDate`, `carrierEta`, `latestCheckCallTime`) still take the
+  newer report's value — those are the carrier's to revise. The *actuals* are not.
+
+Lateness is now judged against the time actually on the record rather than against the
+value the auto path offered, so a load isn't cleared of a late departure by a gate out that
+was never written.
+
+## The status pill carries the overage
+
+`past_scheduled` rendered as "Past Scheduled Pickup", which read identically at one minute
+over and at six hours over. It now reads `Past 8m`, `Past 47m`, `Past 2h 15m`, `Past 6h 10m`
+— the elapsed time since the Pick Up Start date and time, refreshed on every render (the
+board already re-renders on a 30-second poll). It also fits on one line, where the old label
+wrapped to two.
+
+`getStatus` and the pill now share `scheduledDepartureDateTime()`, so the status decision
+and the number reported for it can't disagree about when the deadline was. `statusMeta` was
+already being *called* as `statusMeta(status, s)` in both the log and the CSV export while
+declaring one parameter; it now uses the second, so the export carries the same label.
+
+Unchanged: the "Past Scheduled Pickup" stat tile (a count) and the status filter option (a
+filter key), both of which name the category rather than one load's overage.
+
+### Verified
+
+- Status labels at −90 / +8 / +47 / +135 / +370 minutes, plus a departed load, render as
+  `Pending Pickup`, `Past 8m`, `Past 47m`, `Past 2h 15m`, `Past 6h 10m`, `In Transit` — on
+  the board and through `statusMeta` as the CSV export calls it.
+- A typed `07:45` survives a stop-checkbox cascade that derived `09:30`; a blank one gets
+  `09:30`; a manual edit to `11:22` still wins.
+- A re-import carrying `23:59` leaves an existing `21:40` / `22:10` alone, still OR-s the
+  arrived/completed flags, and still fills a stop that had no times.
+- Gate-out stamping leaves an existing first-stop departure alone.
